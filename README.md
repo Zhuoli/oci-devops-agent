@@ -1,8 +1,16 @@
-# OKE Operations MCP Server
+# OCI DevOps Plugin for OpenCode
 
-**Model Context Protocol (MCP) Server for Oracle Kubernetes Engine Operations**
+**An OpenCode CLI plugin enabling AI-assisted Oracle Cloud Infrastructure operations**
 
-An MCP server that provides AI assistants with tools for performing operational tasks on Oracle Kubernetes Engine (OKE) clusters. This enables Software Engineers to use AI assistants (like Claude) for OKE operational work.
+This plugin extends [OpenCode CLI](https://opencode.ai) with specialized tools, skills, and agent instructions for performing DevOps tasks on Oracle Cloud Infrastructure (OCI), with a focus on Oracle Kubernetes Engine (OKE) operations.
+
+## What This Plugin Provides
+
+| Component | Description |
+|-----------|-------------|
+| **MCP Server** | Model Context Protocol server providing OCI/OKE operational tools |
+| **Skills** | Guided workflows for complex multi-step OKE operations |
+| **AGENTS.md** | Repository-specific instructions and safety guidelines |
 
 ## Key Features
 
@@ -10,126 +18,171 @@ An MCP server that provides AI assistants with tools for performing operational 
 - **Control Plane Upgrades**: Upgrade OKE cluster control planes to latest versions
 - **Node Pool Management**: Upgrade node pool configurations and cycle workers
 - **Image Updates**: Cycle node pools to apply new node images
+- **Safety Controls**: Built-in dry-run support and approval checkpoints for mutating operations
 
-## Supported Operations
+---
 
-| Operation | Description |
-|-----------|-------------|
-| `list_oke_clusters` | List all OKE clusters in a project/stage/region |
-| `get_oke_cluster_details` | Get detailed cluster information including node pools |
-| `upgrade_oke_cluster` | Upgrade cluster control plane to target version |
-| `list_node_pools` | List node pools with current versions |
-| `upgrade_node_pool` | Upgrade node pool Kubernetes version configuration |
-| `cycle_node_pool` | Replace node boot volumes to apply new images |
-| `get_oke_version_report` | Generate version report for all clusters |
+## Installation Guide
 
-## Quick Start
+### Step 1: Install OpenCode CLI
 
-### Prerequisites
+Choose one of the following installation methods:
 
-- Python 3.10+
-- OCI CLI installed and configured
-- Access to Oracle Cloud Infrastructure
-- Poetry for dependency management
+#### Quick Install (Recommended)
+```bash
+curl -fsSL https://opencode.ai/install | bash
+```
 
-### Installation
+#### Package Managers
+
+| Platform | Command |
+|----------|---------|
+| **npm** | `npm i -g opencode-ai@latest` |
+| **Homebrew** | `brew install opencode` |
+| **Go** | `go install github.com/opencode-ai/opencode@latest` |
+| **Arch Linux** | `paru -S opencode-bin` |
+| **Windows (Scoop)** | `scoop bucket add extras && scoop install extras/opencode` |
+| **Windows (Chocolatey)** | `choco install opencode` |
+| **Nix** | `nix run nixpkgs#opencode` |
+
+### Step 2: Configure an AI Provider
+
+OpenCode requires an AI provider. Set one of the following environment variables:
 
 ```bash
-# Clone the repository
-git clone <repository-url>
-cd oracle-sdk-client
+# Claude (Anthropic) - Recommended
+export ANTHROPIC_API_KEY="your-key"
 
-# Install dependencies
+# Or use OpenCode Zen (run /connect in OpenCode TUI)
+# Or OpenAI
+export OPENAI_API_KEY="your-key"
+
+# Or Google Gemini
+export GEMINI_API_KEY="your-key"
+```
+
+### Step 3: Clone This Repository
+
+```bash
+git clone https://github.com/Zhuoli/oci-devops-agent.git
+cd oci-devops-agent
+```
+
+### Step 4: Install Python Dependencies
+
+```bash
+# Requires Python 3.10+ and Poetry
 make install
 ```
 
-### Configuration
-
-Create or update `tools/meta.yaml` with your project/stage/region mappings:
-
-```yaml
-projects:
-  remote-observer:
-    dev:
-      oc1:
-        us-phoenix-1:
-          compartment_id: ocid1.compartment.oc1..aaaaaaaah3k3f5rksyb5iv...
-    staging:
-      oc1:
-        us-ashburn-1:
-          compartment_id: ocid1.compartment.oc1..aaaaaaaasrzpupgdi2aa7l...
-    prod:
-      oc17:
-        us-dcc-phoenix-1:
-          compartment_id: ocid1.compartment.oc17..aaaaaaaasaow4j73qa6mf4...
-```
-
-### Authentication Setup
+### Step 5: Configure OCI Authentication
 
 ```bash
 # Create OCI session token
 oci session authenticate --profile-name DEFAULT --region us-phoenix-1
 ```
 
-### Running the MCP Server
+### Step 6: Configure Project Mappings
 
-```bash
-# Run the MCP server
-make mcp-server
+Create or update `tools/meta.yaml` with your OCI project/stage/region mappings:
 
-# Or run directly with Python
-cd tools && poetry run python src/mcp_server.py
+```yaml
+projects:
+  my-project:
+    dev:
+      oc1:
+        us-phoenix-1:
+          compartment_id: ocid1.compartment.oc1..aaaaaaaah3k3f5rk...
+    staging:
+      oc1:
+        us-ashburn-1:
+          compartment_id: ocid1.compartment.oc1..aaaaaaaasrzpupgd...
+    prod:
+      oc17:
+        us-dcc-phoenix-1:
+          compartment_id: ocid1.compartment.oc17..aaaaaaaasaow4j73...
 ```
 
-### Using with Claude Desktop
+### Step 7: Add MCP Server to OpenCode
 
-Add to your Claude Desktop configuration (`~/.config/claude/claude_desktop_config.json`):
+Add the MCP server configuration to your OpenCode config file.
 
-```json
-{
-  "mcpServers": {
-    "oke-operations": {
-      "command": "poetry",
-      "args": ["run", "python", "src/mcp_server.py"],
-      "cwd": "/path/to/oracle-sdk-client/tools"
-    }
-  }
-}
-```
-
-### Using with OpenCode
-
-[OpenCode](https://opencode.ai) provides an enhanced AI coding experience with Skills support. This repository includes pre-built Skills that guide the AI through complex OKE operational workflows.
-
-#### OpenCode Configuration
-
-Add the MCP server to your OpenCode configuration (`~/.config/opencode/config.json` or `opencode.json` in your project):
+**Location**: `~/.config/opencode/opencode.json` (global) or `opencode.json` (project-local)
 
 ```json
 {
   "$schema": "https://opencode.ai/config.json",
   "mcpServers": {
-    "oke-operations": {
+    "oci-devops": {
+      "type": "stdio",
       "command": "poetry",
       "args": ["run", "python", "src/mcp_server.py"],
-      "cwd": "/path/to/oracle-sdk-client/tools"
+      "cwd": "/path/to/oci-devops-agent/tools"
     }
   }
 }
 ```
 
-#### Available Skills
+### Step 8: Install Skills
 
-This repository includes two OpenCode Skills in `.opencode/skills/`:
+OpenCode skills provide guided workflows for complex operations. This repository includes two skills in `.opencode/skills/`.
 
-| Skill | Description | Use Case |
-|-------|-------------|----------|
-| `oke-cluster-upgrade` | Full Kubernetes version upgrade workflow | Upgrade control-plane, node pool configs, and roll out to workers |
-| `oke-node-upgrade` | Node image update workflow | Apply security patches, OS updates via node cycling |
+#### Option A: Use This Repository Directly
 
-Skills are automatically discovered when you open this repository in OpenCode.
+When you run OpenCode from within this repository, skills are automatically discovered from `.opencode/skills/`.
 
-#### How Skills + MCP Work Together
+```bash
+cd oci-devops-agent
+opencode
+```
+
+#### Option B: Copy Skills to Global Location
+
+Copy skills to your global OpenCode config for use in any project:
+
+```bash
+# Create global skills directory
+mkdir -p ~/.config/opencode/skill
+
+# Copy skills
+cp -r .opencode/skills/oke-cluster-upgrade ~/.config/opencode/skill/
+cp -r .opencode/skills/oke-node-upgrade ~/.config/opencode/skill/
+```
+
+### Step 9: Add AGENTS.md Instructions
+
+The `AGENTS.md` file provides repository guidelines and safety instructions to the AI agent.
+
+#### Option A: Use This Repository Directly
+
+The `AGENTS.md` at the root of this repository is automatically loaded when running OpenCode here.
+
+#### Option B: Copy to Your Project
+
+Copy `AGENTS.md` to your project root or merge its contents with your existing `AGENTS.md`:
+
+```bash
+cp AGENTS.md /path/to/your-project/
+```
+
+#### Option C: Add to Global Config
+
+For global instructions across all projects:
+
+```bash
+cp AGENTS.md ~/.config/opencode/AGENTS.md
+```
+
+---
+
+## Available Skills
+
+| Skill | Description | Invoke With |
+|-------|-------------|-------------|
+| `oke-cluster-upgrade` | Full Kubernetes version upgrade: control-plane, node pool configs, and worker rollout | "Use the oke-cluster-upgrade skill to upgrade..." |
+| `oke-node-upgrade` | Node image update workflow: apply security patches, OS updates via node cycling | "Use the oke-node-upgrade skill to cycle..." |
+
+### How Skills + MCP Work Together
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -160,187 +213,87 @@ Skills are automatically discovered when you open this repository in OpenCode.
 **Skills** define the procedural workflow (what to do, in what order, with what checks).
 **MCP Tools** provide the actual capabilities (API calls to OCI).
 
-#### Example: Using Skills in OpenCode
-
-1. **Open this repository** in OpenCode
-2. **Invoke a skill** by asking the AI:
-
-   For cluster Kubernetes version upgrade:
-   > "Use the oke-cluster-upgrade skill to upgrade the OKE cluster in remote-observer dev us-phoenix-1"
-
-   For node image updates:
-   > "Use the oke-node-upgrade skill to cycle all node pools in the staging cluster"
-
-3. **The AI will**:
-   - Load the skill's procedural instructions
-   - Execute MCP tools in the correct order
-   - Handle decision points (dry-run first, confirm before execution)
-   - Provide status updates and summary reports
-
-#### Skill Workflow: OKE Cluster Upgrade
-
-The `oke-cluster-upgrade` skill guides through a 4-phase process:
-
-```
-Phase 1: Discovery          Phase 2: Control Plane
-┌─────────────────────┐    ┌─────────────────────┐
-│ list_oke_clusters   │───▶│ upgrade_oke_cluster │
-│ get_cluster_details │    │ (dry_run=true)      │
-│ Select version      │    │ upgrade_oke_cluster │
-└─────────────────────┘    │ (dry_run=false)     │
-                           └──────────┬──────────┘
-                                      │
-                                      ▼
-Phase 4: Node Rollout       Phase 3: Data Plane
-┌─────────────────────┐    ┌─────────────────────┐
-│ cycle_node_pool     │◀───│ list_node_pools     │
-│ (for each pool)     │    │ upgrade_node_pool   │
-│ Verify completion   │    │ (for each pool)     │
-└─────────────────────┘    └─────────────────────┘
-```
-
-#### Skill Workflow: OKE Node Upgrade
-
-The `oke-node-upgrade` skill handles node image updates:
-
-```
-Phase 1: Discovery          Phase 2: Planning
-┌─────────────────────┐    ┌─────────────────────┐
-│ list_oke_clusters   │───▶│ Select scope        │
-│ get_cluster_details │    │ (all/specific pools)│
-│ list_node_pools     │    │ Set cycling params  │
-└─────────────────────┘    └──────────┬──────────┘
-                                      │
-                                      ▼
-Phase 4: Verification       Phase 3: Execution
-┌─────────────────────┐    ┌─────────────────────┐
-│ get_cluster_details │◀───│ cycle_node_pool     │
-│ Confirm all ACTIVE  │    │ (dry_run=true)      │
-│ Report summary      │    │ cycle_node_pool     │
-└─────────────────────┘    │ (dry_run=false)     │
-                           └─────────────────────┘
-```
-
-## Usage Examples
-
-### 1. Upgrade OKE Cluster Version to Latest
-
-Ask your AI assistant:
-> "Upgrade the OKE cluster in remote-observer dev us-phoenix-1 to the latest version"
-
-The assistant will:
-1. List clusters to find the target cluster
-2. Check available upgrades
-3. Initiate the control plane upgrade
-4. Report the work request ID for tracking
-
-### 2. Upgrade Node Pool Images
-
-Ask your AI assistant:
-> "Upgrade the node pools in cluster X to the latest Kubernetes version and cycle the nodes"
-
-The assistant will:
-1. Get cluster details and node pools
-2. Upgrade node pool configurations
-3. Cycle node pools to replace boot volumes
-
-### 3. Restart/Upgrade OKE Cluster Nodes
-
-Ask your AI assistant:
-> "Cycle all node pools in the production cluster to apply the new node images"
-
-The assistant will:
-1. List node pools in the cluster
-2. Initiate boot volume replacement for each pool
-3. Report progress and work request IDs
+---
 
 ## MCP Tools Reference
 
-### list_oke_clusters
+### Read-Only Operations
 
-List all OKE clusters for a project/stage/region.
+| Tool | Description | Parameters |
+|------|-------------|------------|
+| `list_oke_clusters` | List all OKE clusters | `project`, `stage`, `region` |
+| `get_oke_cluster_details` | Get detailed cluster info | `project`, `stage`, `region`, `cluster_id` |
+| `list_node_pools` | List node pools for a cluster | `project`, `stage`, `region`, `cluster_id` |
+| `get_oke_version_report` | Generate version report | `project`, `stage` |
 
-**Parameters:**
-- `project` (required): Project name (e.g., 'remote-observer')
-- `stage` (required): Stage name (e.g., 'dev', 'staging', 'prod')
-- `region` (required): OCI region (e.g., 'us-phoenix-1')
+### Mutating Operations (Require User Approval)
 
-### get_oke_cluster_details
+| Tool | Description | Parameters |
+|------|-------------|------------|
+| `upgrade_oke_cluster` | Upgrade control plane | `project`, `stage`, `region`, `cluster_id`, `target_version`, `dry_run` |
+| `upgrade_node_pool` | Upgrade node pool config | `project`, `stage`, `region`, `node_pool_id`, `target_version`, `dry_run` |
+| `cycle_node_pool` | Replace worker nodes | `project`, `stage`, `region`, `node_pool_id`, `maximum_unavailable`, `dry_run` |
 
-Get detailed information about a specific OKE cluster.
+---
 
-**Parameters:**
-- `project`, `stage`, `region` (required)
-- `cluster_id` (required): OKE cluster OCID
+## Usage Examples
 
-### upgrade_oke_cluster
+### Using Skills (Recommended)
 
-Upgrade OKE cluster control plane to a target version.
+Skills provide guided, step-by-step workflows with safety checkpoints.
 
-**Parameters:**
-- `project`, `stage`, `region`, `cluster_id` (required)
-- `target_version` (optional): Target K8s version (defaults to latest)
-- `dry_run` (optional): Preview without making changes
-
-### list_node_pools
-
-List all node pools for an OKE cluster.
-
-**Parameters:**
-- `project`, `stage`, `region`, `cluster_id` (required)
-
-### upgrade_node_pool
-
-Upgrade node pool Kubernetes version configuration.
-
-**Parameters:**
-- `project`, `stage`, `region`, `node_pool_id`, `target_version` (required)
-- `dry_run` (optional): Preview without making changes
-
-### cycle_node_pool
-
-Cycle node pool workers by replacing boot volumes.
-
-**Parameters:**
-- `project`, `stage`, `region`, `node_pool_id` (required)
-- `maximum_unavailable` (optional): Max unavailable nodes (default: 1)
-- `maximum_surge` (optional): Max additional nodes during cycling
-- `dry_run` (optional): Preview without making changes
-
-### get_oke_version_report
-
-Generate a version report for all OKE clusters.
-
-**Parameters:**
-- `project`, `stage` (required)
-
-## CLI Tools
-
-In addition to the MCP server, traditional CLI tools are available:
-
-```bash
-# Generate OKE version report
-make oke-version-report PROJECT=remote-observer STAGE=dev
-
-# Upgrade OKE cluster control plane
-make oke-upgrade REPORT=reports/oke_versions_remote-observer_dev.html
-
-# Upgrade node pools
-make oke-upgrade-node-pools REPORT=reports/oke_versions_remote-observer_dev.html
-
-# Cycle node pools
-make oke-node-cycle REPORT=reports/oke_versions_remote-observer_dev.html
-
-# Bump node pool images from CSV
-make oke-node-pool-bump CSV=oci_image_updates_report.csv
+**Upgrade Kubernetes version:**
 ```
+Use the oke-cluster-upgrade skill to upgrade the OKE cluster in my-project dev us-phoenix-1
+```
+
+**Apply node image updates:**
+```
+Use the oke-node-upgrade skill to cycle all node pools in the staging cluster
+```
+
+### Direct Tool Usage
+
+For simple operations, you can use MCP tools directly.
+
+**List clusters:**
+```
+List all OKE clusters in my-project dev us-phoenix-1
+```
+
+**Check upgrade availability:**
+```
+Get details for cluster X and show me available upgrades
+```
+
+---
+
+## Safety Features
+
+### User Approval Requirements
+
+**CRITICAL: Mutating operations require explicit user approval.**
+
+| Operation Type | Tools | Approval Required |
+|---------------|-------|-------------------|
+| Read-only | `list_oke_clusters`, `get_oke_cluster_details`, `list_node_pools`, `get_oke_version_report` | No |
+| **Mutating** | `upgrade_oke_cluster`, `upgrade_node_pool`, `cycle_node_pool` | **YES** |
+
+### Approval Workflow
+
+1. **Dry-run first**: Use `dry_run=true` to preview changes
+2. **Review the plan**: AI presents what will be modified
+3. **Explicit approval**: AI waits for your "yes" before proceeding
+4. **Per-operation approval**: Each mutating operation requires separate confirmation
+
+---
 
 ## Project Structure
 
 ```
-oracle-sdk-client/
+oci-devops-agent/
 ├── .opencode/
-│   └── skills/                    # OpenCode Skills for guided workflows
+│   └── skills/                    # OpenCode Skills
 │       ├── oke-cluster-upgrade/
 │       │   └── SKILL.md           # K8s version upgrade procedure
 │       └── oke-node-upgrade/
@@ -360,9 +313,32 @@ oracle-sdk-client/
 │   ├── tests/                     # Unit tests
 │   ├── meta.yaml                  # Configuration (gitignored)
 │   └── pyproject.toml             # Dependencies
+├── AGENTS.md                      # Repository guidelines for AI
 ├── README.md                      # This file
 └── Makefile                       # Automation commands
 ```
+
+---
+
+## CLI Tools (Alternative Usage)
+
+In addition to the AI-assisted workflow, traditional CLI tools are available:
+
+```bash
+# Generate OKE version report
+make oke-version-report PROJECT=my-project STAGE=dev
+
+# Upgrade OKE cluster control plane
+make oke-upgrade REPORT=reports/oke_versions_my-project_dev.html
+
+# Upgrade node pools
+make oke-upgrade-node-pools REPORT=reports/oke_versions_my-project_dev.html
+
+# Cycle node pools
+make oke-node-cycle REPORT=reports/oke_versions_my-project_dev.html
+```
+
+---
 
 ## Development
 
@@ -387,19 +363,34 @@ make type-check # Run type checking
 make check     # Run all checks
 ```
 
-## Security
+### Run MCP Server Locally
 
-- Session tokens automatically managed (1-hour expiry)
-- No credentials stored in code or configuration
-- Bastion-based access for private instances
-- Uses OCI SDK security best practices
+```bash
+make mcp-server
+# Or directly:
+cd tools && poetry run python src/mcp_server.py
+```
+
+---
 
 ## Troubleshooting
+
+### OpenCode Not Finding Skills
+
+- Ensure you're running OpenCode from within the repository, OR
+- Copy skills to `~/.config/opencode/skill/`
+- Check skill folder structure: `skill-name/SKILL.md`
+
+### MCP Server Not Connecting
+
+- Verify the `cwd` path in your OpenCode config is absolute
+- Ensure Poetry is installed and dependencies are available
+- Test manually: `cd tools && poetry run python src/mcp_server.py`
 
 ### Authentication Issues
 
 ```bash
-# Refresh session token
+# Refresh OCI session token
 oci session authenticate --profile-name DEFAULT --region us-phoenix-1
 ```
 
@@ -409,19 +400,17 @@ oci session authenticate --profile-name DEFAULT --region us-phoenix-1
 - Check OCI permissions for the authenticated user
 - Ensure clusters exist in the specified regions
 
-### Upgrade Failures
+---
 
-- Check cluster lifecycle state is ACTIVE
-- Verify target version is in available_upgrades
-- Review OCI work request for detailed errors
+## Resources
 
-## Support
-
-For issues and questions:
-1. Check troubleshooting section above
-2. Review OCI documentation
-3. Verify OCI CLI configuration and permissions
+- [OpenCode Documentation](https://opencode.ai/docs/)
+- [OpenCode CLI Reference](https://opencode.ai/docs/cli/)
+- [OpenCode Skills Guide](https://opencode.ai/docs/skills/)
+- [OpenCode Configuration](https://opencode.ai/docs/config/)
+- [AGENTS.md Specification](https://agents.md/)
+- [OCI Documentation](https://docs.oracle.com/en-us/iaas/Content/ContEng/home.htm)
 
 ---
 
-**OKE Operations MCP Server** - Enabling AI-assisted Oracle Kubernetes Engine operations
+**OCI DevOps Plugin for OpenCode** - Enabling AI-assisted Oracle Cloud Infrastructure operations
