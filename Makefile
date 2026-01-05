@@ -1,6 +1,6 @@
-# Makefile for OKE Operations MCP Server
-# MCP Server and CLI tools for Oracle Kubernetes Engine Operations
-# Provides tools for OKE cluster upgrades, node pool management, and image updates
+# Makefile for OCI DevOps Plugin for OpenCode
+# An OpenCode CLI plugin for AI-assisted Oracle Cloud Infrastructure operations
+# Provides MCP server, skills, and CLI tools for OKE cluster management
 
 CMD_COLOR=\033[1;36m
 DESC_COLOR=\033[0;37m
@@ -8,11 +8,11 @@ TITLE_COLOR=\033[1;33m
 RESET=\033[0m
 POLL_SECONDS ?= 30
 
-.PHONY: help install test ssh-sync clean format lint type-check dev-setup ssh-sync-project-alpha-dev ssh-sync-project-alpha-staging ssh-sync-project-alpha-prod ssh-sync-project-beta-dev ssh-sync-project-beta-staging ssh-sync-project-beta-prod ssh-help test-coverage check setup-example quickstart image-updates oke-node-pool-bump oke-node-cycle delete-bucket delete-oke-cluster oke-version-report oke-upgrade oke-upgrade-node-pools mcp-server mcp-install mcp-config
+.PHONY: help install test ssh-sync clean format lint type-check dev-setup ssh-help test-coverage check setup-example quickstart image-updates oke-node-pool-bump oke-node-cycle delete-bucket delete-oke-cluster oke-version-report oke-upgrade oke-upgrade-node-pools mcp-server mcp-install mcp-config
 
 # Default target
 help:
-	@printf "$(TITLE_COLOR)🚀 OKE Operations MCP Server - Available Commands$(RESET)\n\n"
+	@printf "$(TITLE_COLOR)🚀 OCI DevOps Plugin for OpenCode - Available Commands$(RESET)\n\n"
 	@printf "$(TITLE_COLOR)MCP Server Commands:$(RESET)\n"
 	@printf "  $(CMD_COLOR)mcp-server$(RESET)    $(DESC_COLOR)Run the OKE Operations MCP server$(RESET)\n"
 	@printf "  $(CMD_COLOR)mcp-install$(RESET)   $(DESC_COLOR)Install MCP server with dependencies$(RESET)\n\n"
@@ -44,8 +44,8 @@ help:
 	@printf "  $(DESC_COLOR)2. Configure tools/meta.yaml with your OCI compartments$(RESET)\n"
 	@printf "  $(DESC_COLOR)3. make mcp-server$(RESET)\n\n"
 	@printf "$(TITLE_COLOR)Quick Start - CLI:$(RESET)\n"
-	@printf "  $(DESC_COLOR)make oke-version-report PROJECT=project-alpha STAGE=dev$(RESET)\n"
-	@printf "  $(DESC_COLOR)make oke-upgrade REPORT=reports/oke_versions_project-alpha_dev.html$(RESET)\n"
+	@printf "  $(DESC_COLOR)make oke-version-report PROJECT=my-project STAGE=dev$(RESET)\n"
+	@printf "  $(DESC_COLOR)make oke-upgrade REPORT=reports/oke_versions_my-project_dev.html$(RESET)\n"
 
 # Installation and setup
 install:
@@ -101,7 +101,7 @@ mcp-config:
 ssh-sync:
 	@echo "🔧 Running OCI SSH Sync (Generate SSH config)..."
 	@echo "Usage: make ssh-sync PROJECT=<project_name> STAGE=<stage>"
-	@echo "Example: make ssh-sync PROJECT=project-alpha STAGE=dev"
+	@echo "Example: make ssh-sync PROJECT=my-project STAGE=dev"
 	@echo ""
 	@if [ -z "$(PROJECT)" ] || [ -z "$(STAGE)" ]; then \
 		echo "❌ Error: PROJECT and STAGE parameters are required"; \
@@ -110,9 +110,9 @@ ssh-sync:
 		echo "See meta.yaml.example for configuration format"; \
 		echo ""; \
 		echo "Examples:"; \
-		echo "  make ssh-sync PROJECT=project-alpha STAGE=dev"; \
-		echo "  make ssh-sync PROJECT=project-beta STAGE=staging"; \
-		echo "  make ssh-sync PROJECT=project-alpha STAGE=prod"; \
+		echo "  make ssh-sync PROJECT=my-project STAGE=dev"; \
+		echo "  make ssh-sync PROJECT=my-project STAGE=staging"; \
+		echo "  make ssh-sync PROJECT=my-project STAGE=prod"; \
 		exit 1; \
 	fi
 	cd tools && poetry run python src/ssh_sync.py $(PROJECT) $(STAGE)
@@ -234,31 +234,6 @@ oke-upgrade-node-pools:
 	fi; \
 	cd tools && poetry run python src/oke_node_pool_upgrade.py $$REPORT_ARG $$TARGET_FLAG $$PROJECT_FLAG $$STAGE_FLAG $$REGION_FLAG $$CLUSTER_FLAG $$NODE_POOL_FLAG $$DRY_RUN_FLAG $$VERBOSE_FLAG
 
-# Alternative ssh-sync targets for convenience (example targets - customize for your projects)
-ssh-sync-project-alpha-dev:
-	@echo "🔧 Generating SSH config for project-alpha dev environment..."
-	cd tools && poetry run python src/ssh_sync.py project-alpha dev
-
-ssh-sync-project-alpha-staging:
-	@echo "🔧 Generating SSH config for project-alpha staging environment..."
-	cd tools && poetry run python src/ssh_sync.py project-alpha staging
-
-ssh-sync-project-alpha-prod:
-	@echo "🔧 Generating SSH config for project-alpha prod environment..."
-	cd tools && poetry run python src/ssh_sync.py project-alpha prod
-
-ssh-sync-project-beta-dev:
-	@echo "🔧 Generating SSH config for project-beta dev environment..."
-	cd tools && poetry run python src/ssh_sync.py project-beta dev
-
-ssh-sync-project-beta-staging:
-	@echo "🔧 Generating SSH config for project-beta staging environment..."
-	cd tools && poetry run python src/ssh_sync.py project-beta staging
-
-ssh-sync-project-beta-prod:
-	@echo "🔧 Generating SSH config for project-beta prod environment..."
-	cd tools && poetry run python src/ssh_sync.py project-beta prod
-
 ssh-help:
 	@echo "🔧 SSH Sync Configuration Help"
 	@echo ""
@@ -269,52 +244,45 @@ ssh-help:
 	@echo "  • Automatically creates session tokens for each region"
 	@echo ""
 	@echo "What SSH Sync does:"
-	@echo "  1. Parses meta.yaml to get region:compartment_id pairs"
-	@echo "  2. Creates session tokens for each region using create_session_token()"
-	@echo "  3. Lists OKE cluster instances and ODO instances across all regions"
+	@echo "  1. Parses meta.yaml to get region:compartment_id pairs for project/stage"
+	@echo "  2. Creates session tokens for each region"
+	@echo "  3. Discovers OKE cluster worker nodes and ODO instances across all regions"
 	@echo "  4. Finds appropriate bastions for each instance"
 	@echo "  5. Generates SSH config entries with ProxyCommand for bastion access"
-	@echo "  6. Writes SSH configuration to ssh_config_<project>_<stage>.txt"
+	@echo "  6. Writes SSH configuration to ssh_configs/<project>_<stage>.txt"
 	@echo ""
-	@echo "Available Commands:"
-	@echo "  make ssh-sync PROJECT=<project> STAGE=<stage>  # Generic command"
-	@echo "  make ssh-sync-project-alpha-dev                # Example shortcut"
-	@echo "  make ssh-sync-project-alpha-staging"
-	@echo "  make ssh-sync-project-alpha-prod"
-	@echo "  make ssh-sync-project-beta-dev"
-	@echo "  make ssh-sync-project-beta-staging"
-	@echo "  make ssh-sync-project-beta-prod"
+	@echo "Usage:"
+	@echo "  make ssh-sync PROJECT=<project> STAGE=<stage>"
 	@echo ""
 	@echo "Prerequisites:"
 	@echo "  • OCI CLI installed: pip install oci-cli"
 	@echo "  • Valid Oracle Cloud tenancy access"
 	@echo "  • At least one existing OCI profile (DEFAULT) for session token creation"
-	@echo "  • PyYAML package installed (included in dependencies)"
 	@echo "  • ossh command available for ProxyCommand (Oracle internal tool)"
 	@echo ""
 	@echo "Authentication Setup:"
-	@echo "  # Create an initial profile for session token creation:"
 	@echo "  oci session authenticate --profile-name DEFAULT --region us-phoenix-1"
 	@echo ""
 	@echo "Examples:"
-	@echo "  make ssh-sync PROJECT=project-alpha STAGE=dev"
-	@echo "  make ssh-sync-project-beta-staging"
+	@echo "  make ssh-sync PROJECT=my-project STAGE=dev"
+	@echo "  make ssh-sync PROJECT=my-project STAGE=staging"
+	@echo "  make ssh-sync PROJECT=my-project STAGE=prod"
 	@echo ""
 	@echo "Output:"
-	@echo "  SSH config file: ssh_config_<project>_<stage>.txt"
+	@echo "  SSH config file: ssh_configs/<project>_<stage>.txt"
 
 # New command: check for newer images per instance
 image-updates:
 	@echo "🔎 Checking for newer images for compute instances..."
 	@echo "Usage: make image-updates PROJECT=<project_name> STAGE=<stage>"
-	@echo "Example: make image-updates PROJECT=project-alpha STAGE=dev"
+	@echo "Example: make image-updates PROJECT=my-project STAGE=dev"
 	@echo ""
 	@if [ -z "$(PROJECT)" ] || [ -z "$(STAGE)" ]; then \
 		echo "❌ Error: PROJECT and STAGE parameters are required"; \
 		echo ""; \
 		echo "Examples:"; \
-		echo "  make image-updates PROJECT=project-alpha STAGE=dev"; \
-		echo "  make image-updates PROJECT=project-beta STAGE=staging"; \
+		echo "  make image-updates PROJECT=my-project STAGE=dev"; \
+		echo "  make image-updates PROJECT=my-project STAGE=staging"; \
 		exit 1; \
 	fi
 	cd tools && poetry run python src/check_image_updates.py $(PROJECT) $(STAGE)
@@ -468,7 +436,7 @@ setup-example:
 	@echo "export OCI_PROFILE=DEFAULT"
 	@echo ""
 	@echo "# Then run the SSH sync:"
-	@echo "make ssh-sync PROJECT=project-alpha STAGE=dev"
+	@echo "make ssh-sync PROJECT=my-project STAGE=dev"
 
 # Quick start for new users
 quickstart:
@@ -484,7 +452,8 @@ quickstart:
 	@echo "   cp tools/meta.yaml.example tools/meta.yaml"
 	@echo "   # Edit meta.yaml with your project names and compartment IDs"
 	@echo ""
-	@echo "4. Run SSH sync:"
-	@echo "   make ssh-sync PROJECT=project-alpha STAGE=dev"
+	@echo "4. Run SSH sync or OKE version report:"
+	@echo "   make ssh-sync PROJECT=my-project STAGE=dev"
+	@echo "   make oke-version-report PROJECT=my-project STAGE=dev"
 	@echo ""
 	@echo "For more help: make ssh-help"

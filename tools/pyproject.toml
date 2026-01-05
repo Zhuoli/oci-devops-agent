@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "An MCP server for Oracle Kubernetes Engine (OKE) operational tasks including cluster upgrades, node pool management, and image updates"
 authors = ["Your Name <your.email@example.com>"]
 readme = "../README.md"
-packages = [{include = "oci_client", from = "src"}, {include = "mcp_server", from = "src"}]
+packages = [{include = "oci_client", from = "src"}]
 
 [tool.poetry.dependencies]
 python = "^3.10"
@@ -28,10 +28,6 @@ pre-commit = "^3.6.0"
 pytest-asyncio = "^0.21.0"
 types-pyyaml = "^6.0.12.20250822"
 types-requests = "^2.32.4.20250809"
-
-[tool.poetry.scripts]
-oci-client = "oci_client.cli:main"
-oke-mcp-server = "mcp_server:main"
 
 [build-system]
 requires = ["poetry-core>=1.0.0"]
