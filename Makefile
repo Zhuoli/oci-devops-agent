@@ -1,6 +1,6 @@
-# Makefile for OCI SSH Sync
-# SSH Configuration Generator for Oracle Deployment Orchestrator
-# Provides convenient commands for development and SSH config generation
+# Makefile for OKE Operations MCP Server
+# MCP Server and CLI tools for Oracle Kubernetes Engine Operations
+# Provides tools for OKE cluster upgrades, node pool management, and image updates
 
 CMD_COLOR=\033[1;36m
 DESC_COLOR=\033[0;37m
@@ -8,38 +8,44 @@ TITLE_COLOR=\033[1;33m
 RESET=\033[0m
 POLL_SECONDS ?= 30
 
-.PHONY: help install test ssh-sync clean format lint type-check dev-setup ssh-sync-remote-observer-dev ssh-sync-remote-observer-staging ssh-sync-remote-observer-prod ssh-sync-today-all-dev ssh-sync-today-all-staging ssh-sync-today-all-prod ssh-help test-coverage check setup-example quickstart image-updates oke-node-pool-bump oke-node-cycle delete-bucket delete-oke-cluster oke-version-report oke-upgrade oke-upgrade-node-pools
+.PHONY: help install test ssh-sync clean format lint type-check dev-setup ssh-sync-remote-observer-dev ssh-sync-remote-observer-staging ssh-sync-remote-observer-prod ssh-sync-today-all-dev ssh-sync-today-all-staging ssh-sync-today-all-prod ssh-help test-coverage check setup-example quickstart image-updates oke-node-pool-bump oke-node-cycle delete-bucket delete-oke-cluster oke-version-report oke-upgrade oke-upgrade-node-pools mcp-server mcp-install mcp-config
 
 # Default target
 help:
-	@printf "$(TITLE_COLOR)🔧 OCI SSH Sync - Available Commands$(RESET)\n\n"
+	@printf "$(TITLE_COLOR)🚀 OKE Operations MCP Server - Available Commands$(RESET)\n\n"
+	@printf "$(TITLE_COLOR)MCP Server Commands:$(RESET)\n"
+	@printf "  $(CMD_COLOR)mcp-server$(RESET)    $(DESC_COLOR)Run the OKE Operations MCP server$(RESET)\n"
+	@printf "  $(CMD_COLOR)mcp-install$(RESET)   $(DESC_COLOR)Install MCP server with dependencies$(RESET)\n\n"
 	@printf "$(TITLE_COLOR)Setup Commands:$(RESET)\n"
 	@printf "  $(CMD_COLOR)install$(RESET)       $(DESC_COLOR)Install dependencies using Poetry$(RESET)\n"
 	@printf "  $(CMD_COLOR)dev-setup$(RESET)     $(DESC_COLOR)Complete development setup (install + pre-commit hooks)$(RESET)\n\n"
+	@printf "$(TITLE_COLOR)OKE Operations Commands:$(RESET)\n"
+	@printf "  $(CMD_COLOR)oke-version-report$(RESET) $(DESC_COLOR)Generate HTML report of OKE cluster and node pool versions$(RESET)\n"
+	@printf "  $(CMD_COLOR)oke-upgrade$(RESET)   $(DESC_COLOR)Trigger OKE cluster upgrades using a report file$(RESET)\n"
+	@printf "  $(CMD_COLOR)oke-upgrade-node-pools$(RESET) $(DESC_COLOR)Cascade node pool upgrades after the control plane$(RESET)\n"
+	@printf "  $(CMD_COLOR)oke-node-cycle$(RESET) $(DESC_COLOR)Cycle node pools to apply new images (boot volume replace)$(RESET)\n"
+	@printf "  $(CMD_COLOR)oke-node-pool-bump$(RESET) $(DESC_COLOR)Bump node pool images from CSV report$(RESET)\n\n"
 	@printf "$(TITLE_COLOR)SSH Sync Commands:$(RESET)\n"
 	@printf "  $(CMD_COLOR)ssh-sync$(RESET)      $(DESC_COLOR)Generate SSH config for OCI instances$(RESET)\n"
-	@printf "  $(CMD_COLOR)oke-version-report$(RESET) $(DESC_COLOR)Generate HTML report of OKE cluster and node pool versions$(RESET)\n"
-	@printf "  $(CMD_COLOR)oke-upgrade$(RESET)   $(DESC_COLOR)Trigger OKE cluster upgrades using a report file (use REGION_FILTER=<id> to narrow scope)$(RESET)\n"
-	@printf "  $(CMD_COLOR)oke-upgrade-node-pools$(RESET) $(DESC_COLOR)Cascade node pool upgrades after the control plane$(RESET)\n"
 	@printf "  $(CMD_COLOR)ssh-help$(RESET)      $(DESC_COLOR)Show SSH sync configuration help$(RESET)\n"
-	@printf "  $(CMD_COLOR)image-updates$(RESET) $(DESC_COLOR)Check for newer images for compute instances (by project/stage)$(RESET)\n"
-	@printf "  $(CMD_COLOR)oke-node-pool-bump$(RESET) $(DESC_COLOR)CSV=<file> [DRY_RUN=true] [CONFIG=~/.oci/config] [POLL_SECONDS=$(POLL_SECONDS)] [VERBOSE=true]$(RESET)\n"
-	@printf "  $(CMD_COLOR)oke-node-cycle$(RESET) $(DESC_COLOR)REPORT=<file> [GRACE_PERIOD=PT30M] [FORCE_AFTER_GRACE=true] [DRY_RUN=true] [VERBOSE=true]$(RESET)\n"
-	@printf "  $(CMD_COLOR)delete-bucket$(RESET) $(DESC_COLOR)PROJECT=<name> STAGE=<env> REGION=<id> BUCKET=<bucket> [NAMESPACE=<override>]$(RESET)\n"
-	@printf "  $(CMD_COLOR)delete-oke-cluster$(RESET) $(DESC_COLOR)PROJECT=<name> STAGE=<env> REGION=<id> CLUSTER_ID=<ocid> [SKIP_NODE_POOLS=true]$(RESET)\n\n"
+	@printf "  $(CMD_COLOR)image-updates$(RESET) $(DESC_COLOR)Check for newer images for compute instances$(RESET)\n\n"
+	@printf "$(TITLE_COLOR)Resource Management:$(RESET)\n"
+	@printf "  $(CMD_COLOR)delete-bucket$(RESET) $(DESC_COLOR)Delete an OCI bucket$(RESET)\n"
+	@printf "  $(CMD_COLOR)delete-oke-cluster$(RESET) $(DESC_COLOR)Delete an OKE cluster$(RESET)\n\n"
 	@printf "$(TITLE_COLOR)Development Commands:$(RESET)\n"
 	@printf "  $(CMD_COLOR)test$(RESET)          $(DESC_COLOR)Run all tests$(RESET)\n"
-	@printf "  $(CMD_COLOR)test-verbose$(RESET)  $(DESC_COLOR)Run tests with verbose output$(RESET)\n"
 	@printf "  $(CMD_COLOR)format$(RESET)        $(DESC_COLOR)Format code with black and isort$(RESET)\n"
 	@printf "  $(CMD_COLOR)lint$(RESET)          $(DESC_COLOR)Run linting with flake8$(RESET)\n"
 	@printf "  $(CMD_COLOR)type-check$(RESET)    $(DESC_COLOR)Run type checking with mypy$(RESET)\n"
+	@printf "  $(CMD_COLOR)check$(RESET)         $(DESC_COLOR)Run all quality checks$(RESET)\n"
 	@printf "  $(CMD_COLOR)clean$(RESET)         $(DESC_COLOR)Clean up temporary files and caches$(RESET)\n\n"
-	@printf "$(TITLE_COLOR)SSH Sync Configuration:$(RESET)\n"
-	@printf "  $(DESC_COLOR)Uses meta.yaml configuration file for project/stage/region mapping$(RESET)\n\n"
-	@printf "$(TITLE_COLOR)Example:$(RESET)\n"
-	@printf "  $(DESC_COLOR)make ssh-sync PROJECT=remote-observer STAGE=dev$(RESET)\n\n"
-	@printf "$(TITLE_COLOR)For detailed configuration help:$(RESET)\n"
-	@printf "  $(DESC_COLOR)make ssh-help$(RESET)\n"
+	@printf "$(TITLE_COLOR)Quick Start - MCP Server:$(RESET)\n"
+	@printf "  $(DESC_COLOR)1. make install$(RESET)\n"
+	@printf "  $(DESC_COLOR)2. Configure tools/meta.yaml with your OCI compartments$(RESET)\n"
+	@printf "  $(DESC_COLOR)3. make mcp-server$(RESET)\n\n"
+	@printf "$(TITLE_COLOR)Quick Start - CLI:$(RESET)\n"
+	@printf "  $(DESC_COLOR)make oke-version-report PROJECT=remote-observer STAGE=dev$(RESET)\n"
+	@printf "  $(DESC_COLOR)make oke-upgrade REPORT=reports/oke_versions_remote-observer_dev.html$(RESET)\n"
 
 # Installation and setup
 install:
@@ -50,6 +56,46 @@ dev-setup: install
 	@echo "🛠️  Setting up development environment..."
 	cd tools && poetry run pre-commit install
 	@echo "✅ Development environment ready!"
+
+# MCP Server commands
+mcp-server:
+	@echo "🚀 Starting OKE Operations MCP Server..."
+	@echo "The server will listen for MCP protocol messages on stdio."
+	@echo "Connect using Claude Desktop or another MCP client."
+	@echo ""
+	cd tools && poetry run python src/mcp_server.py
+
+mcp-install: install
+	@echo "✅ MCP server installed successfully!"
+	@echo ""
+	@echo "To run the MCP server:"
+	@echo "  make mcp-server"
+	@echo ""
+	@echo "To configure Claude Desktop, add to ~/.config/claude/claude_desktop_config.json:"
+	@echo '  {'
+	@echo '    "mcpServers": {'
+	@echo '      "oke-operations": {'
+	@echo '        "command": "poetry",'
+	@echo '        "args": ["run", "python", "src/mcp_server.py"],'
+	@echo '        "cwd": "$(shell pwd)/tools"'
+	@echo '      }'
+	@echo '    }'
+	@echo '  }'
+
+mcp-config:
+	@echo "📋 Claude Desktop Configuration:"
+	@echo ""
+	@echo "Add the following to ~/.config/claude/claude_desktop_config.json:"
+	@echo ""
+	@echo '{'
+	@echo '  "mcpServers": {'
+	@echo '    "oke-operations": {'
+	@echo '      "command": "poetry",'
+	@echo '      "args": ["run", "python", "src/mcp_server.py"],'
+	@echo '      "cwd": "$(shell pwd)/tools"'
+	@echo '    }'
+	@echo '  }'
+	@echo '}'
 
 # SSH Sync commands
 ssh-sync:
