@@ -112,12 +112,16 @@ Add the MCP server configuration to your OpenCode config file.
 ```json
 {
   "$schema": "https://opencode.ai/config.json",
-  "mcpServers": {
+  "mcp": {
     "oci-devops": {
-      "type": "stdio",
-      "command": "poetry",
-      "args": ["run", "python", "src/mcp_server.py"],
-      "cwd": "/path/to/oci-devops-agent/tools"
+      "type": "local",
+      "command": [
+        "poetry",
+        "--directory", "/path/to/oci-devops-agent/tools",
+        "run",
+        "python",
+        "src/mcp_server.py"
+      ]
     }
   }
 }
