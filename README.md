@@ -97,6 +97,130 @@ Add to your Claude Desktop configuration (`~/.config/claude/claude_desktop_confi
 }
 ```
 
+### Using with OpenCode
+
+[OpenCode](https://opencode.ai) provides an enhanced AI coding experience with Skills support. This repository includes pre-built Skills that guide the AI through complex OKE operational workflows.
+
+#### OpenCode Configuration
+
+Add the MCP server to your OpenCode configuration (`~/.config/opencode/config.json` or `opencode.json` in your project):
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcpServers": {
+    "oke-operations": {
+      "command": "poetry",
+      "args": ["run", "python", "src/mcp_server.py"],
+      "cwd": "/path/to/oracle-sdk-client/tools"
+    }
+  }
+}
+```
+
+#### Available Skills
+
+This repository includes two OpenCode Skills in `.opencode/skills/`:
+
+| Skill | Description | Use Case |
+|-------|-------------|----------|
+| `oke-cluster-upgrade` | Full Kubernetes version upgrade workflow | Upgrade control-plane, node pool configs, and roll out to workers |
+| `oke-node-upgrade` | Node image update workflow | Apply security patches, OS updates via node cycling |
+
+Skills are automatically discovered when you open this repository in OpenCode.
+
+#### How Skills + MCP Work Together
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                         OpenCode                                │
+├─────────────────────────────────────────────────────────────────┤
+│  ┌─────────────────┐    ┌─────────────────────────────────────┐ │
+│  │     Skills      │    │           MCP Server                │ │
+│  │  (Procedures)   │    │           (Tools)                   │ │
+│  ├─────────────────┤    ├─────────────────────────────────────┤ │
+│  │ oke-cluster-    │───▶│ list_oke_clusters                   │ │
+│  │ upgrade         │    │ get_oke_cluster_details             │ │
+│  │                 │    │ upgrade_oke_cluster                 │ │
+│  │ Guides AI       │    │ upgrade_node_pool                   │ │
+│  │ through the     │    │ cycle_node_pool                     │ │
+│  │ correct order   │    │                                     │ │
+│  │ of operations   │    │ Executes actual OCI API calls       │ │
+│  ├─────────────────┤    ├─────────────────────────────────────┤ │
+│  │ oke-node-       │───▶│ list_oke_clusters                   │ │
+│  │ upgrade         │    │ list_node_pools                     │ │
+│  │                 │    │ cycle_node_pool                     │ │
+│  │ Guides AI       │    │ get_oke_version_report              │ │
+│  │ through node    │    │                                     │ │
+│  │ image updates   │    │ Executes actual OCI API calls       │ │
+│  └─────────────────┘    └─────────────────────────────────────┘ │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**Skills** define the procedural workflow (what to do, in what order, with what checks).
+**MCP Tools** provide the actual capabilities (API calls to OCI).
+
+#### Example: Using Skills in OpenCode
+
+1. **Open this repository** in OpenCode
+2. **Invoke a skill** by asking the AI:
+
+   For cluster Kubernetes version upgrade:
+   > "Use the oke-cluster-upgrade skill to upgrade the OKE cluster in remote-observer dev us-phoenix-1"
+
+   For node image updates:
+   > "Use the oke-node-upgrade skill to cycle all node pools in the staging cluster"
+
+3. **The AI will**:
+   - Load the skill's procedural instructions
+   - Execute MCP tools in the correct order
+   - Handle decision points (dry-run first, confirm before execution)
+   - Provide status updates and summary reports
+
+#### Skill Workflow: OKE Cluster Upgrade
+
+The `oke-cluster-upgrade` skill guides through a 4-phase process:
+
+```
+Phase 1: Discovery          Phase 2: Control Plane
+┌─────────────────────┐    ┌─────────────────────┐
+│ list_oke_clusters   │───▶│ upgrade_oke_cluster │
+│ get_cluster_details │    │ (dry_run=true)      │
+│ Select version      │    │ upgrade_oke_cluster │
+└─────────────────────┘    │ (dry_run=false)     │
+                           └──────────┬──────────┘
+                                      │
+                                      ▼
+Phase 4: Node Rollout       Phase 3: Data Plane
+┌─────────────────────┐    ┌─────────────────────┐
+│ cycle_node_pool     │◀───│ list_node_pools     │
+│ (for each pool)     │    │ upgrade_node_pool   │
+│ Verify completion   │    │ (for each pool)     │
+└─────────────────────┘    └─────────────────────┘
+```
+
+#### Skill Workflow: OKE Node Upgrade
+
+The `oke-node-upgrade` skill handles node image updates:
+
+```
+Phase 1: Discovery          Phase 2: Planning
+┌─────────────────────┐    ┌─────────────────────┐
+│ list_oke_clusters   │───▶│ Select scope        │
+│ get_cluster_details │    │ (all/specific pools)│
+│ list_node_pools     │    │ Set cycling params  │
+└─────────────────────┘    └──────────┬──────────┘
+                                      │
+                                      ▼
+Phase 4: Verification       Phase 3: Execution
+┌─────────────────────┐    ┌─────────────────────┐
+│ get_cluster_details │◀───│ cycle_node_pool     │
+│ Confirm all ACTIVE  │    │ (dry_run=true)      │
+│ Report summary      │    │ cycle_node_pool     │
+└─────────────────────┘    │ (dry_run=false)     │
+                           └─────────────────────┘
+```
+
 ## Usage Examples
 
 ### 1. Upgrade OKE Cluster Version to Latest
@@ -215,6 +339,12 @@ make oke-node-pool-bump CSV=oci_image_updates_report.csv
 
 ```
 oracle-sdk-client/
+├── .opencode/
+│   └── skills/                    # OpenCode Skills for guided workflows
+│       ├── oke-cluster-upgrade/
+│       │   └── SKILL.md           # K8s version upgrade procedure
+│       └── oke-node-upgrade/
+│           └── SKILL.md           # Node image update procedure
 ├── tools/
 │   ├── src/
 │   │   ├── mcp_server.py          # MCP server implementation
