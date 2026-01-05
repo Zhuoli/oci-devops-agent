@@ -35,7 +35,7 @@ This skill guides you through upgrading Oracle Kubernetes Engine (OKE) node pool
 ## Prerequisites
 
 Before starting, gather the following information from the user:
-- **project**: Project name (e.g., 'remote-observer', 'today-all')
+- **project**: Project name (e.g., 'project-alpha', 'project-beta')
 - **stage**: Environment stage (e.g., 'dev', 'staging', 'prod')
 - **region**: OCI region (e.g., 'us-phoenix-1', 'us-ashburn-1')
 - **cluster_id** (optional): Specific cluster OCID if known

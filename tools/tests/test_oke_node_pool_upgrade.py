@@ -15,7 +15,7 @@ from oke_upgrade import ReportCluster
 
 def _sample_entry() -> ReportCluster:
     return ReportCluster(
-        project="remote-observer",
+        project="project-alpha",
         stage="dev",
         region="us-phoenix-1",
         cluster_name="cluster-a",

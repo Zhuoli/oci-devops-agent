@@ -55,13 +55,13 @@ def parse_arguments() -> argparse.Namespace:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python ssh_sync.py remote-observer dev
-  python ssh_sync.py today-all staging
-  python ssh_sync.py remote-observer prod --config-file custom.yaml
+  python ssh_sync.py project-alpha dev
+  python ssh_sync.py project-beta staging
+  python ssh_sync.py project-alpha prod --config-file custom.yaml
         """,
     )
 
-    parser.add_argument("project_name", help="Project name (e.g., remote-observer, today-all)")
+    parser.add_argument("project_name", help="Project name (e.g., project-alpha, project-beta)")
 
     parser.add_argument("stage", help="Deployment stage (e.g., dev, staging, prod)")
 

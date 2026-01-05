@@ -17,7 +17,7 @@ def get_compartment_id(
 
     Args:
         yaml_file_path: Path to the YAML configuration file
-        project_name: Name of the project (e.g., 'remote-observer', 'today-all')
+        project_name: Name of the project (e.g., 'project-alpha', 'project-beta')
         stage: Deployment stage (e.g., 'dev', 'staging', 'prod')
         realm: Realm identifier (e.g., 'oc1', 'oc16', 'oc17')
         region: Region identifier (e.g., 'us-phoenix-1', 'us-ashburn-1')
@@ -128,7 +128,7 @@ def get_region_compartment_pairs(
 
     Args:
         yaml_file_path: Path to the YAML configuration file
-        project_name: Name of the project (e.g., 'remote-observer', 'today-all')
+        project_name: Name of the project (e.g., 'project-alpha', 'project-beta')
         stage: Deployment stage (e.g., 'dev', 'staging', 'prod')
 
     Returns:
@@ -218,7 +218,7 @@ if __name__ == "__main__":
     try:
         compartment_id = get_compartment_id(
             yaml_file_path="meta.yaml",
-            project_name="remote-observer",
+            project_name="project-alpha",
             stage="dev",
             realm="oc1",
             region="us-phoenix-1",
@@ -234,7 +234,7 @@ if __name__ == "__main__":
     # Example 2: Get compartment_id with safe version (returns None on error)
     safe_compartment_id: Optional[str] = get_compartment_id_safe(
         yaml_file_path="meta.yaml",
-        project_name="today-all",
+        project_name="project-beta",
         stage="prod",
         realm="oc1",
         region="us-phoenix-1",

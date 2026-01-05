@@ -30,7 +30,7 @@ def test_generate_html_report_includes_cluster_and_node_pool_data() -> None:
     ]
 
     entry = ClusterReportEntry(
-        project="remote-observer",
+        project="project-alpha",
         stage="dev",
         region="us-phoenix-1",
         compartment_id="ocid1.compartment.oc1..example",
@@ -39,7 +39,7 @@ def test_generate_html_report_includes_cluster_and_node_pool_data() -> None:
 
     html = generate_html_report(
         entries=[entry],
-        project_name="remote-observer",
+        project_name="project-alpha",
         stage="dev",
         generated_at=datetime(2024, 1, 1, tzinfo=timezone.utc),
     )
@@ -55,7 +55,7 @@ def test_generate_html_report_includes_cluster_and_node_pool_data() -> None:
 def test_generate_html_report_handles_no_entries() -> None:
     html = generate_html_report(
         entries=[],
-        project_name="today-all",
+        project_name="project-beta",
         stage="prod",
         generated_at=datetime(2024, 1, 1, tzinfo=timezone.utc),
     )

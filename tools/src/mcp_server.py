@@ -119,7 +119,7 @@ async def list_tools() -> List[Tool]:
                 "properties": {
                     "project": {
                         "type": "string",
-                        "description": "Project name (e.g., 'remote-observer', 'today-all')",
+                        "description": "Project name (e.g., 'project-alpha', 'project-beta')",
                     },
                     "stage": {
                         "type": "string",
