@@ -1,81 +1,51 @@
-# OCI SSH Sync
+# OKE Operations MCP Server
 
-**SSH Configuration Generator for Oracle Cloud Infrastructure**
+**Model Context Protocol (MCP) Server for Oracle Kubernetes Engine Operations**
 
-OCI SSH Sync is a Python tool that automatically generates SSH configurations for OKE (Oracle Kubernetes Engine) and ODO (Oracle Digital Office) instances across Oracle Cloud Infrastructure regions. It creates SSH config entries with ProxyCommand for secure bastion-based access to your cloud resources.
+An MCP server that provides AI assistants with tools for performing operational tasks on Oracle Kubernetes Engine (OKE) clusters. This enables Software Engineers to use AI assistants (like Claude) for OKE operational work.
 
-## 🎯 Purpose
+## Key Features
 
-This tool eliminates the manual process of creating SSH configurations for OCI instances by:
+- **Cluster Version Management**: List clusters and check available Kubernetes upgrades
+- **Control Plane Upgrades**: Upgrade OKE cluster control planes to latest versions
+- **Node Pool Management**: Upgrade node pool configurations and cycle workers
+- **Image Updates**: Cycle node pools to apply new node images
 
-1. **Discovering Resources**: Automatically finds OKE clusters and ODO instances across specified regions
-2. **Bastion Matching**: Intelligently matches instances to appropriate bastions for secure access
-3. **Configuration Generation**: Creates ready-to-use SSH config entries with ProxyCommand
-4. **Multi-Region Support**: Handles resources distributed across multiple OCI regions and realms
+## Supported Operations
 
-## 🚀 Quick Start
+| Operation | Description |
+|-----------|-------------|
+| `list_oke_clusters` | List all OKE clusters in a project/stage/region |
+| `get_oke_cluster_details` | Get detailed cluster information including node pools |
+| `upgrade_oke_cluster` | Upgrade cluster control plane to target version |
+| `list_node_pools` | List node pools with current versions |
+| `upgrade_node_pool` | Upgrade node pool Kubernetes version configuration |
+| `cycle_node_pool` | Replace node boot volumes to apply new images |
+| `get_oke_version_report` | Generate version report for all clusters |
+
+## Quick Start
 
 ### Prerequisites
 
-- Python 3.11+ with Poetry
+- Python 3.10+
 - OCI CLI installed and configured
 - Access to Oracle Cloud Infrastructure
-- `ossh` command available (Oracle internal tool)
+- Poetry for dependency management
 
 ### Installation
 
 ```bash
 # Clone the repository
 git clone <repository-url>
-cd oci-python-client
+cd oracle-sdk-client
 
 # Install dependencies
 make install
-
-# Set up development environment (optional)
-make dev-setup
 ```
 
-### Project Structure
+### Configuration
 
-```
-oci-python-client/
-├── tools/                    # All development tools and source code
-│   ├── src/                 # Python source code
-│   │   ├── oci_client/     # Core OCI client library
-│   │   └── ssh_sync.py     # Main SSH sync application
-│   ├── tests/               # Unit tests
-│   ├── meta.yaml           # Configuration file
-│   ├── pyproject.toml      # Poetry dependencies
-│   └── poetry.lock         # Locked dependencies
-├── ssh_configs/             # Generated SSH configuration files
-├── README.md               # This file
-└── Makefile               # Build and automation commands
-```
-
-### Authentication Setup
-
-```bash
-# Create initial OCI profile for session token creation
-oci session authenticate --profile-name DEFAULT --region us-phoenix-1
-```
-
-### Generate SSH Config
-
-```bash
-# Generate SSH config for a specific project and stage
-make ssh-sync PROJECT=remote-observer STAGE=dev
-
-# Alternative: Use convenience commands
-make ssh-sync-remote-observer-dev
-make ssh-sync-today-all-staging
-```
-
-## 📋 Configuration
-
-### YAML Configuration File (`tools/meta.yaml`)
-
-The tool uses a YAML configuration file to define project, stage, and region mappings:
+Create or update `tools/meta.yaml` with your project/stage/region mappings:
 
 ```yaml
 projects:
@@ -88,370 +58,240 @@ projects:
       oc1:
         us-ashburn-1:
           compartment_id: ocid1.compartment.oc1..aaaaaaaasrzpupgdi2aa7l...
-      oc16:
-        us-westjordan-1:
-          compartment_id: ocid1.compartment.oc16..aaaaaaaaj7b7evofguzwlw...
     prod:
       oc17:
         us-dcc-phoenix-1:
           compartment_id: ocid1.compartment.oc17..aaaaaaaasaow4j73qa6mf4...
 ```
 
-### Supported Projects and Stages
-
-- **Projects**: `remote-observer`, `today-all`
-- **Stages**: `dev`, `staging`, `prod`
-- **Realms**: `oc1`, `oc16`, `oc17`
-
-## 🖥️ Usage Examples
-
-### Basic Usage
+### Authentication Setup
 
 ```bash
-# Generate SSH config for remote-observer development
-make ssh-sync PROJECT=remote-observer STAGE=dev
-
-# Generate SSH config for today-all staging
-make ssh-sync PROJECT=today-all STAGE=staging
-```
-
-### Convenience Commands
-
-```bash
-# Development environments
-make ssh-sync-remote-observer-dev
-make ssh-sync-today-all-dev
-
-# Staging environments
-make ssh-sync-remote-observer-staging
-make ssh-sync-today-all-staging
-
-# Production environments
-make ssh-sync-remote-observer-prod
-make ssh-sync-today-all-prod
-```
-
-### Get Help
-
-```bash
-# Show all available commands
-make help
-
-# Show detailed SSH sync configuration help
-make ssh-help
-```
-
-## 📄 Output
-
-The tool generates an SSH configuration file in the `ssh_configs/` directory (created automatically if it doesn't exist), named `ssh_config_<project>_<stage>.txt`, containing:
-
-### Example SSH Config Entry
-
-```bash
-# SSH Config for remote-observer (dev)
-# Generated by OCI SSH Sync
-
-Host remote-observer-dev-phx-oc1-1
-  HostName ocid1.bastion.oc1..bastion123-10.0.1.10
-  ProxyCommand ossh proxy -u %r --overlay-bastion --region us-phoenix-1 --compartment ocid1.compartment.oc1..comp123 -- ssh -A -p 22 ztb-internal.bastion.us-phoenix-1.oci.oraclecloud.com -s proxy:%h:%p
-  # Type: OKE
-  # Private IP: 10.0.1.10
-  # Region: us-phoenix-1
-  # Cluster: my-cluster
-
-Host odo-remote-observer-dev-phx-oc1-1
-  HostName ocid1.bastion.oc1..bastion123-10.0.2.20
-  ProxyCommand ossh proxy -u %r --overlay-bastion --region us-phoenix-1 --compartment ocid1.compartment.oc1..comp123 -- ssh -A -p 22 ztb-internal.bastion.us-phoenix-1.oci.oraclecloud.com -s proxy:%h:%p
-  # Type: ODO
-  # Private IP: 10.0.2.20
-  # Region: us-phoenix-1
-```
-
-### Using the Generated Config
-
-```bash
-# Copy to your SSH config
-cat ssh_configs/remote-observer_dev.txt >> ~/.ssh/config
-
-# Connect to an instance
-ssh remote-observer-dev-phx-oc1-1
-```
-
-## 🏗️ Architecture
-
-### Source Code Structure
-
-```
-tools/
-├── src/
-│   ├── oci_client/                 # OCI client library
-│   │   ├── client.py              # Main OCI client
-│   │   ├── models.py              # Data models
-│   │   ├── auth.py                # Authentication handling
-│   │   └── utils/                 # Utility modules
-│   │       ├── config.py          # YAML configuration loading
-│   │       ├── display.py         # Rich console output
-│   │       ├── resources.py       # Resource collection
-│   │       ├── session.py         # Session token management
-│   │       ├── ssh_config_generator.py  # SSH config generation
-│   │       └── yamler.py          # YAML parsing utilities
-│   └── ssh_sync.py                # Main SSH sync application
-├── tests/                         # Unit tests
-│   ├── test_auth.py              # Authentication tests
-│   ├── test_client.py            # OCI client tests
-│   └── test_ssh_sync.py          # SSH sync tests
-└── meta.yaml                     # Configuration file
-```
-
-### Key Components
-
-1. **Session Management**: Optimized session token creation and reuse
-2. **Resource Discovery**: Automated OKE and ODO instance discovery
-3. **Bastion Matching**: Intelligent subnet-to-bastion mapping
-4. **SSH Config Generation**: ProxyCommand-based SSH configuration
-5. **Multi-Region Support**: Cross-region resource handling
-
-## 🎯 Intelligent Bastion Selection
-
-The tool uses an advanced algorithm to intelligently pair compute instances with the most appropriate bastions for SSH access.
-
-### How Bastion Matching Works
-
-**Network Topology Understanding:**
-- **Compute Instances** are deployed in target subnets (e.g., private subnets)
-- **Bastions** have a `target_subnet_id` property indicating which subnet they provide access to
-- **Pairing Logic**: Instances in `subnet_A` are matched with bastions where `target_subnet_id == subnet_A`
-
-### Multiple Bastion Selection Algorithm
-
-When multiple bastions can access the same subnet, the tool uses intelligent selection:
-
-1. **Find all matching bastions** with the same `target_subnet_id`
-2. **Single bastion**: Use it immediately
-3. **Multiple bastions**: Apply smart selection logic:
-   - Sort bastions alphabetically by name for deterministic ordering
-   - Use hash-based selection with instance ID for consistent pairing
-   - Same instance always gets the same bastion across multiple runs
-   - Distributes instances across available bastions for load balancing
-
-### Selection Benefits
-
-- ✅ **Deterministic**: Same instance always paired with same bastion
-- ✅ **Consistent**: Multiple runs produce identical SSH configurations
-- ✅ **Load Balanced**: Distributes instances across available bastions
-- ✅ **Transparent**: Logs which bastion was selected and why
-
-### Example Selection Output
-
-```bash
-# Multiple bastions available for subnet-123
-Selected bastion bastion-alpha for instance i-1a2b3c4d (chose 1 of 3 available)
-Selected bastion bastion-beta for instance i-5f6g7h8i (chose 2 of 3 available)
-Selected bastion bastion-alpha for instance i-9j0k1l2m (chose 1 of 3 available)
-```
-
-**Distribution Result:**
-```
-bastion-alpha: 7 instances (70.0%)
-bastion-beta:  3 instances (30.0%)
-```
-
-This ensures optimal resource utilization while maintaining consistent SSH access paths.
-
-## 🛠️ Development
-
-### Available Commands
-
-```bash
-# Development setup
-make install              # Install dependencies
-make dev-setup           # Complete development setup
-
-# Code quality
-make format              # Format code with black and isort
-make lint                # Run linting with flake8
-make type-check          # Run type checking with mypy
-
-# Testing
-make test                # Run all tests
-make test-verbose        # Run tests with verbose output
-make test-coverage       # Run tests with coverage
-
-# Cleanup
-make clean               # Clean up temporary files
-```
-
-### Running Tests
-
-```bash
-# Run all tests
-poetry run pytest
-
-# Run tests with coverage
-poetry run pytest --cov=src/oci_client --cov-report=term-missing
-
-# Run specific test file
-poetry run pytest tests/test_client.py -v
-```
-
-## 🔧 Advanced Configuration
-
-### Custom Configuration File
-
-```bash
-# Use a custom YAML configuration file
-cd tools && python src/ssh_sync.py remote-observer dev --config-file custom.yaml
-```
-
-### Session Token Management
-
-The tool automatically:
-- Creates session tokens for each region when needed
-- Reuses valid existing session tokens (within 50-minute window)
-- Falls back to DEFAULT profile if session creation fails
-
-### Environment Variables
-
-Set these environment variables for additional configuration:
-
-```bash
-export OCI_REGION=us-phoenix-1
-export OCI_CONFIG_FILE=~/.oci/config
-```
-
-## 📚 Examples
-
-### Complete Workflow Example
-
-```bash
-# 1. Set up authentication
+# Create OCI session token
 oci session authenticate --profile-name DEFAULT --region us-phoenix-1
-
-# 2. Generate SSH config for development environment
-make ssh-sync PROJECT=remote-observer STAGE=dev
-
-# 3. Review the generated config
-cat ssh_configs/remote-observer_dev.txt
-
-# 4. Add to your SSH config
-cat ssh_configs/remote-observer_dev.txt >> ~/.ssh/config
-
-# 5. Connect to an instance
-ssh remote-observer-dev-phx-oc1-1
 ```
 
-### Multi-Region Example
-
-The tool automatically handles resources across multiple regions:
+### Running the MCP Server
 
 ```bash
-# This command will process all regions defined in meta.yaml for staging
-make ssh-sync PROJECT=remote-observer STAGE=staging
+# Run the MCP server
+make mcp-server
 
-# Output includes entries for:
-# - us-ashburn-1 (oc1 realm)
-# - us-westjordan-1 (oc16 realm)
+# Or run directly with Python
+cd tools && poetry run python src/mcp_server.py
 ```
 
-## 🤝 Contributing
+### Using with Claude Desktop
 
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Make your changes
-4. Run tests (`make test`)
-5. Format code (`make format`)
-6. Commit your changes (`git commit -m 'Add amazing feature'`)
-7. Push to the branch (`git push origin feature/amazing-feature`)
-8. Open a Pull Request
+Add to your Claude Desktop configuration (`~/.config/claude/claude_desktop_config.json`):
 
-## 📋 Requirements
+```json
+{
+  "mcpServers": {
+    "oke-operations": {
+      "command": "poetry",
+      "args": ["run", "python", "src/mcp_server.py"],
+      "cwd": "/path/to/oracle-sdk-client/tools"
+    }
+  }
+}
+```
 
-### System Requirements
+## Usage Examples
 
-- Python 3.11+
-- Poetry for dependency management
-- OCI CLI
-- Access to Oracle Cloud Infrastructure
+### 1. Upgrade OKE Cluster Version to Latest
 
-### Python Dependencies
+Ask your AI assistant:
+> "Upgrade the OKE cluster in remote-observer dev us-phoenix-1 to the latest version"
 
-- `oci` - Oracle Cloud Infrastructure Python SDK
-- `rich` - Rich console output
-- `pyyaml` - YAML configuration parsing
-- `click` - Command line interface
+The assistant will:
+1. List clusters to find the target cluster
+2. Check available upgrades
+3. Initiate the control plane upgrade
+4. Report the work request ID for tracking
 
-## 🔒 Security
+### 2. Upgrade Node Pool Images
 
-- Session tokens are automatically managed and expire after 1 hour
-- Bastion-based access ensures secure connections to private instances
-- No credentials are stored in the generated SSH config files
+Ask your AI assistant:
+> "Upgrade the node pools in cluster X to the latest Kubernetes version and cycle the nodes"
 
-## 📈 Monitoring
+The assistant will:
+1. Get cluster details and node pools
+2. Upgrade node pool configurations
+3. Cycle node pools to replace boot volumes
 
-The tool provides detailed console output including:
-- Resource discovery progress
-- Session token status
-- SSH config generation results
-- Error handling and troubleshooting information
+### 3. Restart/Upgrade OKE Cluster Nodes
 
-## 🐛 Troubleshooting
+Ask your AI assistant:
+> "Cycle all node pools in the production cluster to apply the new node images"
 
-### Common Issues
+The assistant will:
+1. List node pools in the cluster
+2. Initiate boot volume replacement for each pool
+3. Report progress and work request IDs
 
-1. **Authentication Failures**
-   ```bash
-   # Ensure OCI CLI is properly configured
-   oci session authenticate --profile-name DEFAULT --region us-phoenix-1
-   ```
+## MCP Tools Reference
 
-2. **No Instances Found**
-   - Verify compartment IDs in `meta.yaml`
-   - Check that resources exist in the specified regions
+### list_oke_clusters
 
-3. **No Bastions Found**
-   - Ensure internal bastions are deployed in the target compartments
-   - Verify bastion lifecycle state is ACTIVE
+List all OKE clusters for a project/stage/region.
 
-### Debug Mode
+**Parameters:**
+- `project` (required): Project name (e.g., 'remote-observer')
+- `stage` (required): Stage name (e.g., 'dev', 'staging', 'prod')
+- `region` (required): OCI region (e.g., 'us-phoenix-1')
 
-Enable verbose logging for troubleshooting:
+### get_oke_cluster_details
+
+Get detailed information about a specific OKE cluster.
+
+**Parameters:**
+- `project`, `stage`, `region` (required)
+- `cluster_id` (required): OKE cluster OCID
+
+### upgrade_oke_cluster
+
+Upgrade OKE cluster control plane to a target version.
+
+**Parameters:**
+- `project`, `stage`, `region`, `cluster_id` (required)
+- `target_version` (optional): Target K8s version (defaults to latest)
+- `dry_run` (optional): Preview without making changes
+
+### list_node_pools
+
+List all node pools for an OKE cluster.
+
+**Parameters:**
+- `project`, `stage`, `region`, `cluster_id` (required)
+
+### upgrade_node_pool
+
+Upgrade node pool Kubernetes version configuration.
+
+**Parameters:**
+- `project`, `stage`, `region`, `node_pool_id`, `target_version` (required)
+- `dry_run` (optional): Preview without making changes
+
+### cycle_node_pool
+
+Cycle node pool workers by replacing boot volumes.
+
+**Parameters:**
+- `project`, `stage`, `region`, `node_pool_id` (required)
+- `maximum_unavailable` (optional): Max unavailable nodes (default: 1)
+- `maximum_surge` (optional): Max additional nodes during cycling
+- `dry_run` (optional): Preview without making changes
+
+### get_oke_version_report
+
+Generate a version report for all OKE clusters.
+
+**Parameters:**
+- `project`, `stage` (required)
+
+## CLI Tools
+
+In addition to the MCP server, traditional CLI tools are available:
 
 ```bash
-# Set debug level logging
-export OCI_LOG_LEVEL=DEBUG
-make ssh-sync PROJECT=remote-observer STAGE=dev
+# Generate OKE version report
+make oke-version-report PROJECT=remote-observer STAGE=dev
+
+# Upgrade OKE cluster control plane
+make oke-upgrade REPORT=reports/oke_versions_remote-observer_dev.html
+
+# Upgrade node pools
+make oke-upgrade-node-pools REPORT=reports/oke_versions_remote-observer_dev.html
+
+# Cycle node pools
+make oke-node-cycle REPORT=reports/oke_versions_remote-observer_dev.html
+
+# Bump node pool images from CSV
+make oke-node-pool-bump CSV=oci_image_updates_report.csv
 ```
 
-### OKE Instance Detection Troubleshooting
+## Project Structure
 
-If OKE instances are not being detected correctly, the tool now uses multiple detection methods:
+```
+oracle-sdk-client/
+├── tools/
+│   ├── src/
+│   │   ├── mcp_server.py          # MCP server implementation
+│   │   ├── oci_client/            # OCI client library
+│   │   │   ├── client.py          # Main OCI client
+│   │   │   ├── models.py          # Data models
+│   │   │   ├── auth.py            # Authentication
+│   │   │   └── utils/             # Utility modules
+│   │   ├── oke_upgrade.py         # Cluster upgrade CLI
+│   │   ├── oke_node_pool_upgrade.py  # Node pool upgrade CLI
+│   │   ├── oke_node_cycle.py      # Node cycling CLI
+│   │   └── oke_version_report.py  # Version report generator
+│   ├── tests/                     # Unit tests
+│   ├── meta.yaml                  # Configuration (gitignored)
+│   └── pyproject.toml             # Dependencies
+├── README.md                      # This file
+└── Makefile                       # Automation commands
+```
 
-1. **Traditional metadata**: `oke-cluster-display-name` and `oke-initial-node-labels`
-2. **Modern metadata**: `oci.oraclecloud.com/oke-cluster-id` and related fields  
-3. **Kubernetes metadata**: Generic kubernetes-related metadata
-4. **Defined tags**: OKE or Kubernetes-related tag namespaces
-5. **Display name patterns**: Names containing 'oke-', 'k8s-', 'kubernetes', 'node-pool'
+## Development
 
-**Enable debug logging to see detailed detection analysis:**
+### Setup Development Environment
+
 ```bash
-export OCI_LOG_LEVEL=DEBUG
-make ssh-sync PROJECT=remote-observer STAGE=dev
+make dev-setup
 ```
 
-**Common solutions:**
-- Check that your OKE instances have proper metadata or tags
-- Verify instances are in RUNNING state
-- Ensure the tool can access the compartment containing your OKE clusters
+### Run Tests
 
-## 📞 Support
+```bash
+make test
+```
+
+### Code Quality
+
+```bash
+make format    # Format code
+make lint      # Run linting
+make type-check # Run type checking
+make check     # Run all checks
+```
+
+## Security
+
+- Session tokens automatically managed (1-hour expiry)
+- No credentials stored in code or configuration
+- Bastion-based access for private instances
+- Uses OCI SDK security best practices
+
+## Troubleshooting
+
+### Authentication Issues
+
+```bash
+# Refresh session token
+oci session authenticate --profile-name DEFAULT --region us-phoenix-1
+```
+
+### No Clusters Found
+
+- Verify compartment IDs in `meta.yaml`
+- Check OCI permissions for the authenticated user
+- Ensure clusters exist in the specified regions
+
+### Upgrade Failures
+
+- Check cluster lifecycle state is ACTIVE
+- Verify target version is in available_upgrades
+- Review OCI work request for detailed errors
+
+## Support
 
 For issues and questions:
-
-1. Check the troubleshooting section above
-2. Review the generated logs for error details
-3. Ensure all prerequisites are met
-4. Verify OCI CLI configuration and access
+1. Check troubleshooting section above
+2. Review OCI documentation
+3. Verify OCI CLI configuration and permissions
 
 ---
 
-**OCI SSH Sync** - Simplifying SSH access to Oracle Cloud Infrastructure resources
+**OKE Operations MCP Server** - Enabling AI-assisted Oracle Kubernetes Engine operations
