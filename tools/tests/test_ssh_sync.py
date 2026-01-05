@@ -16,23 +16,23 @@ class TestSSHSync:
 
     def test_parse_arguments(self):
         """Test argument parsing."""
-        test_args = ["ssh_sync.py", "remote-observer", "dev", "--config-file", "custom.yaml"]
+        test_args = ["ssh_sync.py", "project-alpha", "dev", "--config-file", "custom.yaml"]
 
         with patch("sys.argv", test_args):
             args = parse_arguments()
 
-            assert args.project_name == "remote-observer"
+            assert args.project_name == "project-alpha"
             assert args.stage == "dev"
             assert args.config_file == "custom.yaml"
 
     def test_parse_arguments_default_config(self):
         """Test argument parsing with default config file."""
-        test_args = ["ssh_sync.py", "today-all", "staging"]
+        test_args = ["ssh_sync.py", "project-beta", "staging"]
 
         with patch("sys.argv", test_args):
             args = parse_arguments()
 
-            assert args.project_name == "today-all"
+            assert args.project_name == "project-beta"
             assert args.stage == "staging"
             assert args.config_file == "meta.yaml"
 

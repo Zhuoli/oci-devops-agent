@@ -8,7 +8,7 @@ TITLE_COLOR=\033[1;33m
 RESET=\033[0m
 POLL_SECONDS ?= 30
 
-.PHONY: help install test ssh-sync clean format lint type-check dev-setup ssh-sync-remote-observer-dev ssh-sync-remote-observer-staging ssh-sync-remote-observer-prod ssh-sync-today-all-dev ssh-sync-today-all-staging ssh-sync-today-all-prod ssh-help test-coverage check setup-example quickstart image-updates oke-node-pool-bump oke-node-cycle delete-bucket delete-oke-cluster oke-version-report oke-upgrade oke-upgrade-node-pools mcp-server mcp-install mcp-config
+.PHONY: help install test ssh-sync clean format lint type-check dev-setup ssh-sync-project-alpha-dev ssh-sync-project-alpha-staging ssh-sync-project-alpha-prod ssh-sync-project-beta-dev ssh-sync-project-beta-staging ssh-sync-project-beta-prod ssh-help test-coverage check setup-example quickstart image-updates oke-node-pool-bump oke-node-cycle delete-bucket delete-oke-cluster oke-version-report oke-upgrade oke-upgrade-node-pools mcp-server mcp-install mcp-config
 
 # Default target
 help:
@@ -44,8 +44,8 @@ help:
 	@printf "  $(DESC_COLOR)2. Configure tools/meta.yaml with your OCI compartments$(RESET)\n"
 	@printf "  $(DESC_COLOR)3. make mcp-server$(RESET)\n\n"
 	@printf "$(TITLE_COLOR)Quick Start - CLI:$(RESET)\n"
-	@printf "  $(DESC_COLOR)make oke-version-report PROJECT=remote-observer STAGE=dev$(RESET)\n"
-	@printf "  $(DESC_COLOR)make oke-upgrade REPORT=reports/oke_versions_remote-observer_dev.html$(RESET)\n"
+	@printf "  $(DESC_COLOR)make oke-version-report PROJECT=project-alpha STAGE=dev$(RESET)\n"
+	@printf "  $(DESC_COLOR)make oke-upgrade REPORT=reports/oke_versions_project-alpha_dev.html$(RESET)\n"
 
 # Installation and setup
 install:
@@ -101,19 +101,18 @@ mcp-config:
 ssh-sync:
 	@echo "🔧 Running OCI SSH Sync (Generate SSH config)..."
 	@echo "Usage: make ssh-sync PROJECT=<project_name> STAGE=<stage>"
-	@echo "Example: make ssh-sync PROJECT=remote-observer STAGE=dev"
+	@echo "Example: make ssh-sync PROJECT=project-alpha STAGE=dev"
 	@echo ""
 	@if [ -z "$(PROJECT)" ] || [ -z "$(STAGE)" ]; then \
 		echo "❌ Error: PROJECT and STAGE parameters are required"; \
 		echo ""; \
-		echo "Available projects and stages from meta.yaml:"; \
-		echo "  remote-observer: dev, staging, prod"; \
-		echo "  today-all: dev, staging, prod"; \
+		echo "Available projects and stages are defined in meta.yaml"; \
+		echo "See meta.yaml.example for configuration format"; \
 		echo ""; \
 		echo "Examples:"; \
-		echo "  make ssh-sync PROJECT=remote-observer STAGE=dev"; \
-		echo "  make ssh-sync PROJECT=today-all STAGE=staging"; \
-		echo "  make ssh-sync PROJECT=remote-observer STAGE=prod"; \
+		echo "  make ssh-sync PROJECT=project-alpha STAGE=dev"; \
+		echo "  make ssh-sync PROJECT=project-beta STAGE=staging"; \
+		echo "  make ssh-sync PROJECT=project-alpha STAGE=prod"; \
 		exit 1; \
 	fi
 	cd tools && poetry run python src/ssh_sync.py $(PROJECT) $(STAGE)
@@ -235,37 +234,37 @@ oke-upgrade-node-pools:
 	fi; \
 	cd tools && poetry run python src/oke_node_pool_upgrade.py $$REPORT_ARG $$TARGET_FLAG $$PROJECT_FLAG $$STAGE_FLAG $$REGION_FLAG $$CLUSTER_FLAG $$NODE_POOL_FLAG $$DRY_RUN_FLAG $$VERBOSE_FLAG
 
-# Alternative ssh-sync targets for convenience
-ssh-sync-remote-observer-dev:
-	@echo "🔧 Generating SSH config for remote-observer dev environment..."
-	cd tools && poetry run python src/ssh_sync.py remote-observer dev
+# Alternative ssh-sync targets for convenience (example targets - customize for your projects)
+ssh-sync-project-alpha-dev:
+	@echo "🔧 Generating SSH config for project-alpha dev environment..."
+	cd tools && poetry run python src/ssh_sync.py project-alpha dev
 
-ssh-sync-remote-observer-staging:
-	@echo "🔧 Generating SSH config for remote-observer staging environment..."
-	cd tools && poetry run python src/ssh_sync.py remote-observer staging
+ssh-sync-project-alpha-staging:
+	@echo "🔧 Generating SSH config for project-alpha staging environment..."
+	cd tools && poetry run python src/ssh_sync.py project-alpha staging
 
-ssh-sync-remote-observer-prod:
-	@echo "🔧 Generating SSH config for remote-observer prod environment..."
-	cd tools && poetry run python src/ssh_sync.py remote-observer prod
+ssh-sync-project-alpha-prod:
+	@echo "🔧 Generating SSH config for project-alpha prod environment..."
+	cd tools && poetry run python src/ssh_sync.py project-alpha prod
 
-ssh-sync-today-all-dev:
-	@echo "🔧 Generating SSH config for today-all dev environment..."
-	cd tools && poetry run python src/ssh_sync.py today-all dev
+ssh-sync-project-beta-dev:
+	@echo "🔧 Generating SSH config for project-beta dev environment..."
+	cd tools && poetry run python src/ssh_sync.py project-beta dev
 
-ssh-sync-today-all-staging:
-	@echo "🔧 Generating SSH config for today-all staging environment..."
-	cd tools && poetry run python src/ssh_sync.py today-all staging
+ssh-sync-project-beta-staging:
+	@echo "🔧 Generating SSH config for project-beta staging environment..."
+	cd tools && poetry run python src/ssh_sync.py project-beta staging
 
-ssh-sync-today-all-prod:
-	@echo "🔧 Generating SSH config for today-all prod environment..."
-	cd tools && poetry run python src/ssh_sync.py today-all prod
+ssh-sync-project-beta-prod:
+	@echo "🔧 Generating SSH config for project-beta prod environment..."
+	cd tools && poetry run python src/ssh_sync.py project-beta prod
 
 ssh-help:
 	@echo "🔧 SSH Sync Configuration Help"
 	@echo ""
 	@echo "Configuration:"
 	@echo "  SSH Sync uses YAML configuration from meta.yaml file"
-	@echo "  • Supports multiple projects: remote-observer, today-all"
+	@echo "  • Define your projects in meta.yaml (see meta.yaml.example)"
 	@echo "  • Supports multiple stages: dev, staging, prod"
 	@echo "  • Automatically creates session tokens for each region"
 	@echo ""
@@ -279,12 +278,12 @@ ssh-help:
 	@echo ""
 	@echo "Available Commands:"
 	@echo "  make ssh-sync PROJECT=<project> STAGE=<stage>  # Generic command"
-	@echo "  make ssh-sync-remote-observer-dev              # Specific shortcuts"
-	@echo "  make ssh-sync-remote-observer-staging"
-	@echo "  make ssh-sync-remote-observer-prod"
-	@echo "  make ssh-sync-today-all-dev"
-	@echo "  make ssh-sync-today-all-staging"
-	@echo "  make ssh-sync-today-all-prod"
+	@echo "  make ssh-sync-project-alpha-dev                # Example shortcut"
+	@echo "  make ssh-sync-project-alpha-staging"
+	@echo "  make ssh-sync-project-alpha-prod"
+	@echo "  make ssh-sync-project-beta-dev"
+	@echo "  make ssh-sync-project-beta-staging"
+	@echo "  make ssh-sync-project-beta-prod"
 	@echo ""
 	@echo "Prerequisites:"
 	@echo "  • OCI CLI installed: pip install oci-cli"
@@ -298,8 +297,8 @@ ssh-help:
 	@echo "  oci session authenticate --profile-name DEFAULT --region us-phoenix-1"
 	@echo ""
 	@echo "Examples:"
-	@echo "  make ssh-sync PROJECT=remote-observer STAGE=dev"
-	@echo "  make ssh-sync-today-all-staging"
+	@echo "  make ssh-sync PROJECT=project-alpha STAGE=dev"
+	@echo "  make ssh-sync-project-beta-staging"
 	@echo ""
 	@echo "Output:"
 	@echo "  SSH config file: ssh_config_<project>_<stage>.txt"
@@ -308,14 +307,14 @@ ssh-help:
 image-updates:
 	@echo "🔎 Checking for newer images for compute instances..."
 	@echo "Usage: make image-updates PROJECT=<project_name> STAGE=<stage>"
-	@echo "Example: make image-updates PROJECT=remote-observer STAGE=dev"
+	@echo "Example: make image-updates PROJECT=project-alpha STAGE=dev"
 	@echo ""
 	@if [ -z "$(PROJECT)" ] || [ -z "$(STAGE)" ]; then \
 		echo "❌ Error: PROJECT and STAGE parameters are required"; \
 		echo ""; \
 		echo "Examples:"; \
-		echo "  make image-updates PROJECT=remote-observer STAGE=dev"; \
-		echo "  make image-updates PROJECT=today-all STAGE=staging"; \
+		echo "  make image-updates PROJECT=project-alpha STAGE=dev"; \
+		echo "  make image-updates PROJECT=project-beta STAGE=staging"; \
 		exit 1; \
 	fi
 	cd tools && poetry run python src/check_image_updates.py $(PROJECT) $(STAGE)
@@ -469,7 +468,7 @@ setup-example:
 	@echo "export OCI_PROFILE=DEFAULT"
 	@echo ""
 	@echo "# Then run the SSH sync:"
-	@echo "make ssh-sync PROJECT=remote-observer STAGE=dev"
+	@echo "make ssh-sync PROJECT=project-alpha STAGE=dev"
 
 # Quick start for new users
 quickstart:
@@ -481,10 +480,11 @@ quickstart:
 	@echo "2. Set up your OCI authentication:"
 	@echo "   oci session authenticate --profile-name DEFAULT --region us-phoenix-1"
 	@echo ""
-	@echo "3. Set your compartment ID:"
-	@echo "   export OCI_COMPARTMENT_ID=your-compartment-ocid-here"
+	@echo "3. Configure your projects:"
+	@echo "   cp tools/meta.yaml.example tools/meta.yaml"
+	@echo "   # Edit meta.yaml with your project names and compartment IDs"
 	@echo ""
 	@echo "4. Run SSH sync:"
-	@echo "   make ssh-sync PROJECT=remote-observer STAGE=dev"
+	@echo "   make ssh-sync PROJECT=project-alpha STAGE=dev"
 	@echo ""
 	@echo "For more help: make ssh-help"

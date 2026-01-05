@@ -33,7 +33,7 @@ def _write_temp_report(tmp_path: Path, rows: List[str]) -> Path:
 def test_load_clusters_from_report_parses_rows(tmp_path: Path) -> None:
     row = (
         "      <tr>"
-        "<td>remote-observer</td>"
+        "<td>project-alpha</td>"
         "<td>dev</td>"
         "<td>us-phoenix-1</td>"
         "<td>cluster-a</td>"
@@ -50,7 +50,7 @@ def test_load_clusters_from_report_parses_rows(tmp_path: Path) -> None:
 
     assert len(clusters) == 1
     cluster = clusters[0]
-    assert cluster.project == "remote-observer"
+    assert cluster.project == "project-alpha"
     assert cluster.stage == "dev"
     assert cluster.region == "us-phoenix-1"
     assert cluster.cluster_name == "cluster-a"
@@ -78,7 +78,7 @@ def test_choose_target_version_handles_prefixed_request() -> None:
 
 def test_perform_cluster_upgrades_dry_run(monkeypatch: pytest.MonkeyPatch) -> None:
     entry = ReportCluster(
-        project="remote-observer",
+        project="project-alpha",
         stage="dev",
         region="us-phoenix-1",
         cluster_name="cluster-a",
@@ -108,7 +108,7 @@ def test_perform_cluster_upgrades_dry_run(monkeypatch: pytest.MonkeyPatch) -> No
 
 def test_perform_cluster_upgrades_triggers_upgrade(monkeypatch: pytest.MonkeyPatch) -> None:
     entry = ReportCluster(
-        project="remote-observer",
+        project="project-alpha",
         stage="dev",
         region="us-phoenix-1",
         cluster_name="cluster-a",
@@ -155,7 +155,7 @@ def test_perform_cluster_upgrades_triggers_upgrade(monkeypatch: pytest.MonkeyPat
         filters={},
     )
 
-    assert requested_profile["key"] == ("remote-observer", "dev", "us-phoenix-1")
+    assert requested_profile["key"] == ("project-alpha", "dev", "us-phoenix-1")
     assert fake_client.calls == [("ocid1.cluster.oc1..clusterA", "v1.34.1")]
     assert len(results) == 1
     assert results[0].success is True
@@ -165,7 +165,7 @@ def test_perform_cluster_upgrades_triggers_upgrade(monkeypatch: pytest.MonkeyPat
 
 def test_perform_cluster_upgrades_uses_container_engine_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
     entry = ReportCluster(
-        project="remote-observer",
+        project="project-alpha",
         stage="dev",
         region="us-phoenix-1",
         cluster_name="cluster-a",
@@ -216,7 +216,7 @@ def test_perform_cluster_upgrades_uses_container_engine_fallback(monkeypatch: py
 
 def test_perform_cluster_upgrades_falls_back_to_latest(monkeypatch: pytest.MonkeyPatch) -> None:
     entry = ReportCluster(
-        project="remote-observer",
+        project="project-alpha",
         stage="dev",
         region="us-phoenix-1",
         cluster_name="cluster-a",
@@ -265,7 +265,7 @@ def test_perform_cluster_upgrades_falls_back_to_latest(monkeypatch: pytest.Monke
 
 def test_perform_cluster_upgrades_marks_skip_when_no_upgrades(monkeypatch: pytest.MonkeyPatch) -> None:
     entry = ReportCluster(
-        project="today-all",
+        project="project-beta",
         stage="dev",
         region="us-phoenix-1",
         cluster_name="cluster-phx",
@@ -315,7 +315,7 @@ def test_perform_cluster_upgrades_marks_skip_when_no_upgrades(monkeypatch: pytes
 def test_perform_cluster_upgrades_processes_multiple_entries(monkeypatch: pytest.MonkeyPatch) -> None:
     entries = [
         ReportCluster(
-            project="today-all",
+            project="project-beta",
             stage="dev",
             region="us-phoenix-1",
             cluster_name="cluster-phx",
@@ -325,7 +325,7 @@ def test_perform_cluster_upgrades_processes_multiple_entries(monkeypatch: pytest
             cluster_ocid="ocid1.cluster.oc1..phx",
         ),
         ReportCluster(
-            project="today-all",
+            project="project-beta",
             stage="dev",
             region="us-ashburn-1",
             cluster_name="cluster-iad",
@@ -335,7 +335,7 @@ def test_perform_cluster_upgrades_processes_multiple_entries(monkeypatch: pytest
             cluster_ocid="ocid1.cluster.oc1..iad",
         ),
         ReportCluster(
-            project="today-all",
+            project="project-beta",
             stage="dev",
             region="eu-frankfurt-1",
             cluster_name="cluster-fra",
@@ -366,9 +366,9 @@ def test_perform_cluster_upgrades_processes_multiple_entries(monkeypatch: pytest
             return f"wr-{cluster_id.split('.')[-1]}"
 
     fake_clients = {
-        ("today-all", "dev", "us-phoenix-1"): FakeClient(["v1.34.0", "v1.34.1"]),
-        ("today-all", "dev", "us-ashburn-1"): FakeClient(["v1.33.0", "v1.33.1"]),
-        ("today-all", "dev", "eu-frankfurt-1"): FakeClient(["v1.33.0", "v1.33.1"]),
+        ("project-beta", "dev", "us-phoenix-1"): FakeClient(["v1.34.0", "v1.34.1"]),
+        ("project-beta", "dev", "us-ashburn-1"): FakeClient(["v1.33.0", "v1.33.1"]),
+        ("project-beta", "dev", "eu-frankfurt-1"): FakeClient(["v1.33.0", "v1.33.1"]),
     }
 
     def fake_setup_session_token(project: str, stage: str, region: str) -> str:
@@ -395,6 +395,6 @@ def test_perform_cluster_upgrades_processes_multiple_entries(monkeypatch: pytest
     assert len(results) == 3
     assert all(result.success for result in results)
     assert [r.skipped for r in results] == [False, False, False]
-    assert fake_clients[("today-all", "dev", "us-phoenix-1")].calls == [("ocid1.cluster.oc1..phx", "v1.34.1")]
-    assert fake_clients[("today-all", "dev", "us-ashburn-1")].calls == [("ocid1.cluster.oc1..iad", "v1.33.1")]
-    assert fake_clients[("today-all", "dev", "eu-frankfurt-1")].calls == [("ocid1.cluster.oc1..fra", "v1.33.1")]
+    assert fake_clients[("project-beta", "dev", "us-phoenix-1")].calls == [("ocid1.cluster.oc1..phx", "v1.34.1")]
+    assert fake_clients[("project-beta", "dev", "us-ashburn-1")].calls == [("ocid1.cluster.oc1..iad", "v1.33.1")]
+    assert fake_clients[("project-beta", "dev", "eu-frankfurt-1")].calls == [("ocid1.cluster.oc1..fra", "v1.33.1")]
