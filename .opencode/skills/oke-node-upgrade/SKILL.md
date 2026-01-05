@@ -2,13 +2,28 @@
 name: oke-node-upgrade
 description: Upgrade OKE node pools to latest node image version and cycle workers to apply new images. Use for regular node image maintenance, security patches, or OS updates without changing Kubernetes version.
 metadata:
-  version: "1.0"
+  version: "1.1"
   category: "devops"
 ---
 
 # OKE Node Image Upgrade
 
 This skill guides you through upgrading Oracle Kubernetes Engine (OKE) node pools to the latest node image version. This is used for applying security patches, OS updates, or newer Oracle Linux images without changing the Kubernetes version.
+
+## User Approval Requirements
+
+**CRITICAL: This workflow contains mutating operations that require explicit user approval.**
+
+| Operation Type | Tools | Approval Required |
+|---------------|-------|-------------------|
+| Read-only | `list_oke_clusters`, `get_oke_cluster_details`, `list_node_pools`, `get_oke_version_report` | No |
+| **Mutating** | `cycle_node_pool` | **YES - MUST WAIT** |
+
+**Rules:**
+- Always dry-run (`dry_run=true`) before any mutation
+- Present dry-run results and ask for explicit user approval
+- Only execute (`dry_run=false`) after user confirms with "yes"
+- Get separate approval for EACH node pool cycling operation
 
 ## When to Use This Skill
 
@@ -30,7 +45,7 @@ Before starting, gather the following information from the user:
 
 ## Upgrade Procedure
 
-### Phase 1: Discovery and Assessment
+### Phase 1: Discovery and Assessment (No Approval Needed)
 
 1. **List clusters** to find the target:
    ```
@@ -60,7 +75,7 @@ Before starting, gather the following information from the user:
    - **All node pools**: Cycle all pools in the cluster sequentially
    - **Specific pools**: Target only named pools (e.g., by pattern matching)
    - **Single pool**: Update one specific pool
-   - **IMPORTANT**: Present the plan to the user and get confirmation
+   - Present the plan to the user for confirmation
 
 5. **Determine cycling parameters**:
    - `maximum_unavailable`: How many nodes can be down simultaneously
@@ -84,9 +99,26 @@ Before starting, gather the following information from the user:
    )
    ```
    - Review output: node count, pool name, cycling parameters
-   - Confirm with user before proceeding
 
-   b. **Execute node cycling**:
+   b. **🛑 APPROVAL CHECKPOINT - Node Cycling**:
+   Present to user and WAIT for approval:
+   ```
+   Ready to cycle worker nodes to apply new image:
+   - Node Pool: {node_pool_name} ({node_pool_id})
+   - Current nodes: {node_count}
+   - Maximum unavailable: {maximum_unavailable}
+   - Maximum surge: {maximum_surge or "not set"}
+   - Impact: Each node will be:
+     1. Cordoned (no new pods scheduled)
+     2. Drained (existing pods evicted)
+     3. Terminated
+     4. Replaced with new node using latest image
+
+   Do you approve cycling this node pool? (yes/no)
+   ```
+   **DO NOT PROCEED until user responds "yes"**
+
+   c. **Execute node cycling** (only after approval):
    ```
    cycle_node_pool(
      project, stage, region,
@@ -103,13 +135,15 @@ Before starting, gather the following information from the user:
    - **Sequential processing (recommended for production)**:
      - Process one node pool at a time
      - Wait for each to complete before starting the next
+     - Get approval for each pool individually
      - Provides controlled rollout and easy rollback points
 
    - **Parallel processing (acceptable for dev/test)**:
-     - Multiple pools can be cycled simultaneously
+     - Still requires individual approval for each pool
+     - Can initiate multiple cycles after getting separate approvals
      - Faster but higher risk of service disruption
 
-### Phase 4: Verification
+### Phase 4: Verification (No Approval Needed)
 
 8. **Monitor progress**:
    - Node pools will show `lifecycle_state=UPDATING` during cycling
@@ -140,6 +174,7 @@ For upgrading nodes across multiple clusters in a stage:
 
 2. **Process clusters sequentially**:
    - Complete one cluster before moving to next
+   - Get approval for each node pool in each cluster
    - Provides clear rollback boundaries
 
 ## Error Handling
