@@ -43,3 +43,47 @@ OCI SSH Sync generates bastion-ready SSH configs for Oracle Cloud Infrastructure
 ## Security & Configuration Tips
 - Do not commit real OCI credentials, session tokens, or generated configs; rely on local `.gitignore` hygiene.
 - Validate `meta.yaml` edits with `make ssh-sync` in a sandbox tenancy before sharing.
+
+## OKE Operations - User Approval Required
+
+**CRITICAL: Mutating operations on OKE clusters require explicit user approval before execution.**
+
+### Read-Only Operations (No Approval Needed)
+These tools are safe to invoke without user confirmation:
+- `list_oke_clusters` - List clusters in a compartment
+- `get_oke_cluster_details` - Get cluster information
+- `list_node_pools` - List node pools for a cluster
+- `get_oke_version_report` - Generate version report
+
+### Mutating Operations (MUST Get User Approval)
+**NEVER execute these without explicit user confirmation:**
+
+| Tool | Action | Risk |
+|------|--------|------|
+| `upgrade_oke_cluster` | Upgrades control plane | Causes brief API unavailability |
+| `upgrade_node_pool` | Updates node pool config | Changes node configuration |
+| `cycle_node_pool` | Replaces worker nodes | Causes pod evictions and rescheduling |
+
+### Approval Workflow
+
+1. **Always dry-run first**: Use `dry_run=true` to preview changes
+2. **Present the plan**: Show the user what will be modified
+3. **Wait for explicit approval**: Ask "Do you want me to proceed with this operation?"
+4. **Only proceed after "yes"**: Execute with `dry_run=false` only after user confirms
+
+### Example Approval Request
+```
+I'm ready to upgrade the control plane:
+- Cluster: my-cluster (ocid1.cluster.oc1...)
+- Current version: 1.28.2
+- Target version: 1.29.1
+- Estimated downtime: API briefly unavailable during upgrade
+
+Do you want me to proceed with this upgrade? (yes/no)
+```
+
+### No Batch Mutations Without Per-Operation Approval
+When upgrading multiple node pools or clusters:
+- Get approval for EACH operation individually
+- Do not batch multiple mutations into a single approval request
+- Report status after each completed operation before requesting approval for the next
