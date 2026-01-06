@@ -348,6 +348,99 @@ async def list_tools() -> List[Tool]:
                 "required": ["project", "stage"],
             },
         ),
+        Tool(
+            name="list_cluster_nodes",
+            description="List all worker nodes (compute instances) for an OKE cluster. Returns node details including lifecycle state, private IP, and node pool membership.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "project": {
+                        "type": "string",
+                        "description": "Project name",
+                    },
+                    "stage": {
+                        "type": "string",
+                        "description": "Stage name",
+                    },
+                    "region": {
+                        "type": "string",
+                        "description": "OCI region name",
+                    },
+                    "cluster_id": {
+                        "type": "string",
+                        "description": "OKE cluster OCID",
+                    },
+                    "config_file": {
+                        "type": "string",
+                        "description": "Path to meta.yaml config file",
+                        "default": "meta.yaml",
+                    },
+                },
+                "required": ["project", "stage", "region", "cluster_id"],
+            },
+        ),
+        Tool(
+            name="get_node_pool_details",
+            description="Get detailed information about a specific node pool including all individual worker nodes and their states.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "project": {
+                        "type": "string",
+                        "description": "Project name",
+                    },
+                    "stage": {
+                        "type": "string",
+                        "description": "Stage name",
+                    },
+                    "region": {
+                        "type": "string",
+                        "description": "OCI region name",
+                    },
+                    "node_pool_id": {
+                        "type": "string",
+                        "description": "OKE node pool OCID",
+                    },
+                    "config_file": {
+                        "type": "string",
+                        "description": "Path to meta.yaml config file",
+                        "default": "meta.yaml",
+                    },
+                },
+                "required": ["project", "stage", "region", "node_pool_id"],
+            },
+        ),
+        Tool(
+            name="check_node_image_updates",
+            description="Check which nodes in a cluster or compartment have newer OS images available. Compares current node images against the latest available images of the same type.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "project": {
+                        "type": "string",
+                        "description": "Project name",
+                    },
+                    "stage": {
+                        "type": "string",
+                        "description": "Stage name",
+                    },
+                    "region": {
+                        "type": "string",
+                        "description": "OCI region name",
+                    },
+                    "cluster_id": {
+                        "type": "string",
+                        "description": "OKE cluster OCID (optional - if not provided, checks all instances in compartment)",
+                    },
+                    "config_file": {
+                        "type": "string",
+                        "description": "Path to meta.yaml config file",
+                        "default": "meta.yaml",
+                    },
+                },
+                "required": ["project", "stage", "region"],
+            },
+        ),
     ]
 
 
@@ -369,6 +462,12 @@ async def call_tool(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
             return await _cycle_node_pool(arguments)
         elif name == "get_oke_version_report":
             return await _get_oke_version_report(arguments)
+        elif name == "list_cluster_nodes":
+            return await _list_cluster_nodes(arguments)
+        elif name == "get_node_pool_details":
+            return await _get_node_pool_details(arguments)
+        elif name == "check_node_image_updates":
+            return await _check_node_image_updates(arguments)
         else:
             return [TextContent(type="text", text=f"Unknown tool: {name}")]
     except Exception as e:
@@ -727,6 +826,370 @@ async def _get_oke_version_report(arguments: Dict[str, Any]) -> List[TextContent
             report["regions"][region] = {"error": str(e)}
 
     return [TextContent(type="text", text=json.dumps(report, indent=2))]
+
+
+def _serialize_node(node: Any) -> Dict[str, Any]:
+    """Serialize a node object to a JSON-serializable dict."""
+    return {
+        "node_id": getattr(node, "id", None),
+        "name": getattr(node, "name", None),
+        "lifecycle_state": getattr(node, "lifecycle_state", None),
+        "private_ip": getattr(node, "private_ip", None),
+        "public_ip": getattr(node, "public_ip", None),
+        "availability_domain": getattr(node, "availability_domain", None),
+        "fault_domain": getattr(node, "fault_domain", None),
+        "subnet_id": getattr(node, "subnet_id", None),
+        "node_pool_id": getattr(node, "node_pool_id", None),
+        "kubernetes_version": getattr(node, "kubernetes_version", None),
+        "node_error": _serialize_node_error(getattr(node, "node_error", None)),
+    }
+
+
+def _serialize_node_error(node_error: Any) -> Optional[Dict[str, Any]]:
+    """Serialize node error information if present."""
+    if node_error is None:
+        return None
+    return {
+        "code": getattr(node_error, "code", None),
+        "message": getattr(node_error, "message", None),
+        "status": getattr(node_error, "status", None),
+    }
+
+
+async def _list_cluster_nodes(arguments: Dict[str, Any]) -> List[TextContent]:
+    """List all worker nodes for an OKE cluster."""
+    project = arguments["project"]
+    stage = arguments["stage"]
+    region = arguments["region"]
+    cluster_id = arguments["cluster_id"]
+    config_file = arguments.get("config_file", "meta.yaml")
+
+    client, error = _get_client(project, stage, region, config_file)
+    if error:
+        return [TextContent(type="text", text=f"Error: {error}")]
+
+    compartment_id = _get_compartment_id(project, stage, region, config_file)
+
+    try:
+        ce_client = client.container_engine_client
+
+        # Get cluster name for context
+        cluster = client.get_oke_cluster(cluster_id)
+
+        # Get all node pools for the cluster
+        node_pools = client.list_node_pools(cluster_id, compartment_id)
+
+        all_nodes = []
+        nodes_by_state = {}
+        unhealthy_nodes = []
+
+        for np in node_pools:
+            # Get detailed node pool info including nodes
+            try:
+                np_details = ce_client.get_node_pool(np.node_pool_id).data
+                nodes = getattr(np_details, "nodes", []) or []
+
+                for node in nodes:
+                    node_data = _serialize_node(node)
+                    node_data["node_pool_name"] = np.name
+                    all_nodes.append(node_data)
+
+                    # Track state distribution
+                    state = node_data.get("lifecycle_state", "UNKNOWN")
+                    nodes_by_state[state] = nodes_by_state.get(state, 0) + 1
+
+                    # Track unhealthy nodes (not ACTIVE)
+                    if state not in ("ACTIVE", "CREATING"):
+                        unhealthy_nodes.append({
+                            "node_id": node_data.get("node_id"),
+                            "name": node_data.get("name"),
+                            "lifecycle_state": state,
+                            "node_pool_name": np.name,
+                            "node_error": node_data.get("node_error"),
+                        })
+
+            except Exception as e:
+                logger.warning(f"Failed to get nodes for node pool {np.node_pool_id}: {e}")
+
+        result = {
+            "cluster_id": cluster_id,
+            "cluster_name": cluster.name,
+            "region": region,
+            "total_nodes": len(all_nodes),
+            "nodes_by_state": nodes_by_state,
+            "unhealthy_node_count": len(unhealthy_nodes),
+            "unhealthy_nodes": unhealthy_nodes,
+            "nodes": all_nodes,
+        }
+
+        return [TextContent(type="text", text=json.dumps(result, indent=2))]
+
+    except Exception as e:
+        return [TextContent(type="text", text=f"Error listing cluster nodes: {str(e)}")]
+
+
+async def _get_node_pool_details(arguments: Dict[str, Any]) -> List[TextContent]:
+    """Get detailed information about a specific node pool including all nodes."""
+    project = arguments["project"]
+    stage = arguments["stage"]
+    region = arguments["region"]
+    node_pool_id = arguments["node_pool_id"]
+    config_file = arguments.get("config_file", "meta.yaml")
+
+    client, error = _get_client(project, stage, region, config_file)
+    if error:
+        return [TextContent(type="text", text=f"Error: {error}")]
+
+    try:
+        ce_client = client.container_engine_client
+
+        # Get full node pool details
+        np_details = ce_client.get_node_pool(node_pool_id).data
+        nodes = getattr(np_details, "nodes", []) or []
+
+        # Serialize all nodes
+        serialized_nodes = [_serialize_node(node) for node in nodes]
+
+        # Calculate state distribution
+        nodes_by_state = {}
+        unhealthy_nodes = []
+        for node_data in serialized_nodes:
+            state = node_data.get("lifecycle_state", "UNKNOWN")
+            nodes_by_state[state] = nodes_by_state.get(state, 0) + 1
+
+            if state not in ("ACTIVE", "CREATING"):
+                unhealthy_nodes.append({
+                    "node_id": node_data.get("node_id"),
+                    "name": node_data.get("name"),
+                    "lifecycle_state": state,
+                    "node_error": node_data.get("node_error"),
+                })
+
+        # Get node source info (image details)
+        node_source = getattr(np_details, "node_source", None)
+        node_source_info = None
+        if node_source:
+            node_source_info = {
+                "source_type": getattr(node_source, "source_type", None),
+                "image_id": getattr(node_source, "image_id", None),
+            }
+
+        result = {
+            "node_pool_id": node_pool_id,
+            "name": getattr(np_details, "name", None),
+            "cluster_id": getattr(np_details, "cluster_id", None),
+            "compartment_id": getattr(np_details, "compartment_id", None),
+            "kubernetes_version": getattr(np_details, "kubernetes_version", None),
+            "lifecycle_state": getattr(np_details, "lifecycle_state", None),
+            "node_shape": getattr(np_details, "node_shape", None),
+            "node_source": node_source_info,
+            "total_nodes": len(serialized_nodes),
+            "nodes_by_state": nodes_by_state,
+            "unhealthy_node_count": len(unhealthy_nodes),
+            "unhealthy_nodes": unhealthy_nodes,
+            "nodes": serialized_nodes,
+        }
+
+        return [TextContent(type="text", text=json.dumps(result, indent=2))]
+
+    except oci_exceptions.ServiceError as e:
+        return [TextContent(type="text", text=f"OCI Service Error: {e.message}")]
+    except Exception as e:
+        return [TextContent(type="text", text=f"Error getting node pool details: {str(e)}")]
+
+
+async def _check_node_image_updates(arguments: Dict[str, Any]) -> List[TextContent]:
+    """Check which nodes have newer OS images available."""
+    project = arguments["project"]
+    stage = arguments["stage"]
+    region = arguments["region"]
+    cluster_id = arguments.get("cluster_id")  # Optional
+    config_file = arguments.get("config_file", "meta.yaml")
+
+    client, error = _get_client(project, stage, region, config_file)
+    if error:
+        return [TextContent(type="text", text=f"Error: {error}")]
+
+    compartment_id = _get_compartment_id(project, stage, region, config_file)
+    if not compartment_id:
+        return [TextContent(type="text", text=f"Error: Could not find compartment ID for {project}/{stage}/{region}")]
+
+    try:
+        compute_client = client.compute_client
+        ce_client = client.container_engine_client
+
+        # Collect nodes to check
+        nodes_to_check = []
+
+        if cluster_id:
+            # Get nodes for specific cluster
+            cluster = client.get_oke_cluster(cluster_id)
+            node_pools = client.list_node_pools(cluster_id, compartment_id)
+
+            for np in node_pools:
+                try:
+                    np_details = ce_client.get_node_pool(np.node_pool_id).data
+                    node_source = getattr(np_details, "node_source", None)
+                    pool_image_id = getattr(node_source, "image_id", None) if node_source else None
+
+                    nodes = getattr(np_details, "nodes", []) or []
+                    for node in nodes:
+                        node_id = getattr(node, "id", None)
+                        if node_id and getattr(node, "lifecycle_state", None) == "ACTIVE":
+                            nodes_to_check.append({
+                                "node_id": node_id,
+                                "node_name": getattr(node, "name", node_id),
+                                "node_pool_id": np.node_pool_id,
+                                "node_pool_name": np.name,
+                                "pool_image_id": pool_image_id,
+                                "cluster_id": cluster_id,
+                                "cluster_name": cluster.name,
+                            })
+                except Exception as e:
+                    logger.warning(f"Failed to get nodes for node pool {np.node_pool_id}: {e}")
+        else:
+            # Get all running instances in compartment and detect OKE nodes
+            instances = client.list_oke_instances(compartment_id)
+            for inst in instances:
+                nodes_to_check.append({
+                    "node_id": inst.instance_id,
+                    "node_name": inst.display_name,
+                    "node_pool_id": None,
+                    "node_pool_name": None,
+                    "pool_image_id": None,
+                    "cluster_id": None,
+                    "cluster_name": inst.cluster_name,
+                })
+
+        # Check each node for image updates
+        results = []
+        nodes_needing_update = 0
+        nodes_up_to_date = 0
+        nodes_unknown = 0
+
+        for node_info in nodes_to_check:
+            node_result = {
+                "node_id": node_info["node_id"],
+                "node_name": node_info["node_name"],
+                "node_pool_name": node_info["node_pool_name"],
+                "cluster_name": node_info["cluster_name"],
+                "current_image_name": None,
+                "current_image_id": None,
+                "latest_image_name": None,
+                "latest_image_id": None,
+                "needs_update": False,
+                "status": "unknown",
+            }
+
+            try:
+                # Get instance details to find current image
+                instance = compute_client.get_instance(node_info["node_id"]).data
+                image_id = getattr(instance, "image_id", None) or node_info.get("pool_image_id")
+
+                if not image_id:
+                    node_result["status"] = "no_image_id"
+                    nodes_unknown += 1
+                    results.append(node_result)
+                    continue
+
+                node_result["current_image_id"] = image_id
+
+                # Get current image details
+                try:
+                    current_image = compute_client.get_image(image_id).data
+                    node_result["current_image_name"] = getattr(current_image, "display_name", image_id)
+
+                    # Try to find LATEST image of same type
+                    image_compartment_id = getattr(current_image, "compartment_id", None)
+                    defined_tags = getattr(current_image, "defined_tags", {}) or {}
+
+                    # Check for image type in defined tags
+                    image_type = None
+                    for namespace in ["ics_images", "icm_images"]:
+                        ns_tags = defined_tags.get(namespace, {})
+                        if isinstance(ns_tags, dict) and "type" in ns_tags:
+                            image_type = ns_tags["type"]
+                            break
+
+                    if not image_type or not image_compartment_id:
+                        node_result["status"] = "no_image_type_tag"
+                        nodes_unknown += 1
+                        results.append(node_result)
+                        continue
+
+                    # Search for LATEST image with same type
+                    from oci.pagination import list_call_get_all_results
+                    images = list_call_get_all_results(
+                        compute_client.list_images,
+                        compartment_id=image_compartment_id,
+                        sort_by="TIMECREATED",
+                        sort_order="DESC",
+                    ).data
+
+                    latest_image = None
+                    for img in images:
+                        img_tags = getattr(img, "defined_tags", {}) or {}
+                        img_type = None
+                        release = None
+
+                        for namespace in ["ics_images", "icm_images"]:
+                            ns_tags = img_tags.get(namespace, {})
+                            if isinstance(ns_tags, dict):
+                                if "type" in ns_tags:
+                                    img_type = ns_tags["type"]
+                                if "release" in ns_tags:
+                                    release = ns_tags["release"]
+
+                        if img_type == image_type and release and release.upper() == "LATEST":
+                            latest_image = img
+                            break
+
+                    if latest_image:
+                        latest_name = getattr(latest_image, "display_name", None)
+                        latest_id = getattr(latest_image, "id", None)
+                        node_result["latest_image_name"] = latest_name
+                        node_result["latest_image_id"] = latest_id
+
+                        if latest_id != image_id:
+                            node_result["needs_update"] = True
+                            node_result["status"] = "update_available"
+                            nodes_needing_update += 1
+                        else:
+                            node_result["status"] = "up_to_date"
+                            nodes_up_to_date += 1
+                    else:
+                        node_result["status"] = "no_latest_image_found"
+                        nodes_unknown += 1
+
+                except oci_exceptions.ServiceError as e:
+                    node_result["status"] = f"image_lookup_error: {e.message}"
+                    nodes_unknown += 1
+
+            except oci_exceptions.ServiceError as e:
+                node_result["status"] = f"instance_lookup_error: {e.message}"
+                nodes_unknown += 1
+
+            results.append(node_result)
+
+        # Build summary
+        summary = {
+            "project": project,
+            "stage": stage,
+            "region": region,
+            "cluster_id": cluster_id,
+            "compartment_id": compartment_id,
+            "total_nodes_checked": len(results),
+            "nodes_needing_update": nodes_needing_update,
+            "nodes_up_to_date": nodes_up_to_date,
+            "nodes_unknown": nodes_unknown,
+            "nodes_with_updates": [r for r in results if r["needs_update"]],
+            "all_nodes": results,
+        }
+
+        return [TextContent(type="text", text=json.dumps(summary, indent=2))]
+
+    except Exception as e:
+        return [TextContent(type="text", text=f"Error checking node image updates: {str(e)}")]
 
 
 async def main() -> None:
