@@ -35,7 +35,13 @@ from oci.container_engine.models import (
 from oci import exceptions as oci_exceptions
 
 from oci_client.client import OCIClient
-from oci_client.models import OKEClusterInfo, OKENodePoolInfo
+from oci_client.models import (
+    DeploymentInfo,
+    DeploymentPipelineInfo,
+    DevOpsProjectInfo,
+    OKEClusterInfo,
+    OKENodePoolInfo,
+)
 from oci_client.utils.config import load_region_compartments
 from oci_client.utils.session import create_oci_client, setup_session_token
 
@@ -67,6 +73,53 @@ def _serialize_node_pool(node_pool: OKENodePoolInfo) -> Dict[str, Any]:
         "name": node_pool.name,
         "kubernetes_version": node_pool.kubernetes_version,
         "lifecycle_state": node_pool.lifecycle_state,
+    }
+
+
+def _serialize_devops_project(project: DevOpsProjectInfo) -> Dict[str, Any]:
+    """Serialize DevOpsProjectInfo to a JSON-serializable dict."""
+    return {
+        "project_id": project.project_id,
+        "name": project.name,
+        "description": project.description,
+        "compartment_id": project.compartment_id,
+        "lifecycle_state": project.lifecycle_state,
+        "time_created": project.time_created,
+        "notification_config": project.notification_config,
+    }
+
+
+def _serialize_deployment_pipeline(pipeline: DeploymentPipelineInfo) -> Dict[str, Any]:
+    """Serialize DeploymentPipelineInfo to a JSON-serializable dict."""
+    return {
+        "pipeline_id": pipeline.pipeline_id,
+        "display_name": pipeline.display_name,
+        "project_id": pipeline.project_id,
+        "compartment_id": pipeline.compartment_id,
+        "description": pipeline.description,
+        "lifecycle_state": pipeline.lifecycle_state,
+        "time_created": pipeline.time_created,
+        "time_updated": pipeline.time_updated,
+    }
+
+
+def _serialize_deployment(deployment: DeploymentInfo) -> Dict[str, Any]:
+    """Serialize DeploymentInfo to a JSON-serializable dict."""
+    return {
+        "deployment_id": deployment.deployment_id,
+        "display_name": deployment.display_name,
+        "deployment_type": deployment.deployment_type,
+        "deploy_pipeline_id": deployment.deploy_pipeline_id,
+        "compartment_id": deployment.compartment_id,
+        "lifecycle_state": deployment.lifecycle_state,
+        "lifecycle_details": deployment.lifecycle_details,
+        "time_created": deployment.time_created,
+        "time_started": deployment.time_started,
+        "time_finished": deployment.time_finished,
+        "deployment_execution_progress": deployment.deployment_execution_progress,
+        "deployment_arguments": deployment.deployment_arguments,
+        "freeform_tags": deployment.freeform_tags,
+        "defined_tags": deployment.defined_tags,
     }
 
 
@@ -441,6 +494,132 @@ async def list_tools() -> List[Tool]:
                 "required": ["project", "stage", "region"],
             },
         ),
+        # ========== DevOps Tools ==========
+        Tool(
+            name="list_devops_projects",
+            description="List all DevOps projects in a compartment. Returns project names, IDs, descriptions, and lifecycle states.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "project": {
+                        "type": "string",
+                        "description": "Project name (e.g., 'project-alpha', 'project-beta')",
+                    },
+                    "stage": {
+                        "type": "string",
+                        "description": "Stage name (e.g., 'dev', 'staging', 'prod')",
+                    },
+                    "region": {
+                        "type": "string",
+                        "description": "OCI region name (e.g., 'us-phoenix-1', 'us-ashburn-1')",
+                    },
+                    "config_file": {
+                        "type": "string",
+                        "description": "Path to meta.yaml config file (default: meta.yaml)",
+                        "default": "meta.yaml",
+                    },
+                },
+                "required": ["project", "stage", "region"],
+            },
+        ),
+        Tool(
+            name="list_deployment_pipelines",
+            description="List all deployment pipelines in a DevOps project or compartment. Returns pipeline names, IDs, and lifecycle states.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "project": {
+                        "type": "string",
+                        "description": "Project name",
+                    },
+                    "stage": {
+                        "type": "string",
+                        "description": "Stage name",
+                    },
+                    "region": {
+                        "type": "string",
+                        "description": "OCI region name",
+                    },
+                    "devops_project_id": {
+                        "type": "string",
+                        "description": "DevOps project OCID (optional - if not provided, lists all pipelines in compartment)",
+                    },
+                    "config_file": {
+                        "type": "string",
+                        "description": "Path to meta.yaml config file",
+                        "default": "meta.yaml",
+                    },
+                },
+                "required": ["project", "stage", "region"],
+            },
+        ),
+        Tool(
+            name="get_recent_deployment",
+            description="Get the most recent deployment for a deployment pipeline. Returns deployment status (SUCCEEDED/FAILED/IN_PROGRESS), start time, finish time, and execution details including any errors.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "project": {
+                        "type": "string",
+                        "description": "Project name",
+                    },
+                    "stage": {
+                        "type": "string",
+                        "description": "Stage name",
+                    },
+                    "region": {
+                        "type": "string",
+                        "description": "OCI region name",
+                    },
+                    "pipeline_id": {
+                        "type": "string",
+                        "description": "Deployment pipeline OCID",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Number of recent deployments to retrieve (default: 1)",
+                        "default": 1,
+                    },
+                    "config_file": {
+                        "type": "string",
+                        "description": "Path to meta.yaml config file",
+                        "default": "meta.yaml",
+                    },
+                },
+                "required": ["project", "stage", "region", "pipeline_id"],
+            },
+        ),
+        Tool(
+            name="get_deployment_logs",
+            description="Get detailed logs and error information for a specific deployment. Shows stage-by-stage execution details and highlights any failures with error messages.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "project": {
+                        "type": "string",
+                        "description": "Project name",
+                    },
+                    "stage": {
+                        "type": "string",
+                        "description": "Stage name",
+                    },
+                    "region": {
+                        "type": "string",
+                        "description": "OCI region name",
+                    },
+                    "deployment_id": {
+                        "type": "string",
+                        "description": "Deployment OCID",
+                    },
+                    "config_file": {
+                        "type": "string",
+                        "description": "Path to meta.yaml config file",
+                        "default": "meta.yaml",
+                    },
+                },
+                "required": ["project", "stage", "region", "deployment_id"],
+            },
+        ),
     ]
 
 
@@ -468,6 +647,15 @@ async def call_tool(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
             return await _get_node_pool_details(arguments)
         elif name == "check_node_image_updates":
             return await _check_node_image_updates(arguments)
+        # DevOps tools
+        elif name == "list_devops_projects":
+            return await _list_devops_projects(arguments)
+        elif name == "list_deployment_pipelines":
+            return await _list_deployment_pipelines(arguments)
+        elif name == "get_recent_deployment":
+            return await _get_recent_deployment(arguments)
+        elif name == "get_deployment_logs":
+            return await _get_deployment_logs(arguments)
         else:
             return [TextContent(type="text", text=f"Unknown tool: {name}")]
     except Exception as e:
@@ -1190,6 +1378,181 @@ async def _check_node_image_updates(arguments: Dict[str, Any]) -> List[TextConte
 
     except Exception as e:
         return [TextContent(type="text", text=f"Error checking node image updates: {str(e)}")]
+
+
+# ========== DevOps Tool Handlers ==========
+
+
+async def _list_devops_projects(arguments: Dict[str, Any]) -> List[TextContent]:
+    """List DevOps projects in a compartment."""
+    project = arguments["project"]
+    stage = arguments["stage"]
+    region = arguments["region"]
+    config_file = arguments.get("config_file", "meta.yaml")
+
+    client, error = _get_client(project, stage, region, config_file)
+    if error:
+        return [TextContent(type="text", text=f"Error: {error}")]
+
+    compartment_id = _get_compartment_id(project, stage, region, config_file)
+    if not compartment_id:
+        return [TextContent(type="text", text=f"Error: Could not find compartment ID for {project}/{stage}/{region}")]
+
+    try:
+        projects = client.list_devops_projects(compartment_id)
+        result = {
+            "project": project,
+            "stage": stage,
+            "region": region,
+            "compartment_id": compartment_id,
+            "devops_project_count": len(projects),
+            "devops_projects": [_serialize_devops_project(p) for p in projects],
+        }
+        return [TextContent(type="text", text=json.dumps(result, indent=2))]
+    except Exception as e:
+        return [TextContent(type="text", text=f"Error listing DevOps projects: {str(e)}")]
+
+
+async def _list_deployment_pipelines(arguments: Dict[str, Any]) -> List[TextContent]:
+    """List deployment pipelines in a DevOps project or compartment."""
+    project = arguments["project"]
+    stage = arguments["stage"]
+    region = arguments["region"]
+    devops_project_id = arguments.get("devops_project_id")
+    config_file = arguments.get("config_file", "meta.yaml")
+
+    client, error = _get_client(project, stage, region, config_file)
+    if error:
+        return [TextContent(type="text", text=f"Error: {error}")]
+
+    compartment_id = _get_compartment_id(project, stage, region, config_file)
+    if not compartment_id:
+        return [TextContent(type="text", text=f"Error: Could not find compartment ID for {project}/{stage}/{region}")]
+
+    try:
+        pipelines = client.list_deployment_pipelines(
+            compartment_id=compartment_id,
+            project_id=devops_project_id,
+        )
+        result = {
+            "project": project,
+            "stage": stage,
+            "region": region,
+            "compartment_id": compartment_id,
+            "devops_project_id": devops_project_id,
+            "pipeline_count": len(pipelines),
+            "pipelines": [_serialize_deployment_pipeline(p) for p in pipelines],
+        }
+        return [TextContent(type="text", text=json.dumps(result, indent=2))]
+    except Exception as e:
+        return [TextContent(type="text", text=f"Error listing deployment pipelines: {str(e)}")]
+
+
+async def _get_recent_deployment(arguments: Dict[str, Any]) -> List[TextContent]:
+    """Get the most recent deployment for a pipeline."""
+    project = arguments["project"]
+    stage = arguments["stage"]
+    region = arguments["region"]
+    pipeline_id = arguments["pipeline_id"]
+    limit = arguments.get("limit", 1)
+    config_file = arguments.get("config_file", "meta.yaml")
+
+    client, error = _get_client(project, stage, region, config_file)
+    if error:
+        return [TextContent(type="text", text=f"Error: {error}")]
+
+    try:
+        deployments = client.get_recent_deployment(pipeline_id, limit=limit)
+
+        if not deployments:
+            return [TextContent(
+                type="text",
+                text=json.dumps({
+                    "project": project,
+                    "stage": stage,
+                    "region": region,
+                    "pipeline_id": pipeline_id,
+                    "deployment_count": 0,
+                    "message": "No deployments found for this pipeline",
+                }, indent=2)
+            )]
+
+        # Build a summary for each deployment
+        deployment_summaries = []
+        for deployment in deployments:
+            status = deployment.lifecycle_state
+            is_success = status == "SUCCEEDED"
+            is_failed = status == "FAILED"
+            is_in_progress = status in ("IN_PROGRESS", "ACCEPTED", "CANCELING")
+
+            # Get failed stages if any
+            failed_stages = []
+            if deployment.deployment_execution_progress:
+                stage_progress = deployment.deployment_execution_progress.get(
+                    "deploy_stage_execution_progress", {}
+                )
+                for stage_id, stage_info in stage_progress.items():
+                    if stage_info.get("status") in ("FAILED", "CANCELED", "ROLLBACK_FAILED"):
+                        failed_stages.append({
+                            "stage_id": stage_id,
+                            "display_name": stage_info.get("deploy_stage_display_name"),
+                            "status": stage_info.get("status"),
+                        })
+
+            summary = {
+                "deployment_id": deployment.deployment_id,
+                "display_name": deployment.display_name,
+                "status": status,
+                "is_success": is_success,
+                "is_failed": is_failed,
+                "is_in_progress": is_in_progress,
+                "time_started": deployment.time_started,
+                "time_finished": deployment.time_finished,
+                "lifecycle_details": deployment.lifecycle_details,
+                "failed_stages": failed_stages,
+                "full_details": _serialize_deployment(deployment),
+            }
+            deployment_summaries.append(summary)
+
+        result = {
+            "project": project,
+            "stage": stage,
+            "region": region,
+            "pipeline_id": pipeline_id,
+            "deployment_count": len(deployments),
+            "deployments": deployment_summaries,
+        }
+        return [TextContent(type="text", text=json.dumps(result, indent=2))]
+
+    except Exception as e:
+        return [TextContent(type="text", text=f"Error getting recent deployment: {str(e)}")]
+
+
+async def _get_deployment_logs(arguments: Dict[str, Any]) -> List[TextContent]:
+    """Get detailed logs for a specific deployment."""
+    project = arguments["project"]
+    stage = arguments["stage"]
+    region = arguments["region"]
+    deployment_id = arguments["deployment_id"]
+    config_file = arguments.get("config_file", "meta.yaml")
+
+    client, error = _get_client(project, stage, region, config_file)
+    if error:
+        return [TextContent(type="text", text=f"Error: {error}")]
+
+    try:
+        logs = client.get_deployment_logs(deployment_id)
+
+        result = {
+            "project": project,
+            "stage": stage,
+            "region": region,
+            **logs,
+        }
+        return [TextContent(type="text", text=json.dumps(result, indent=2))]
+
+    except Exception as e:
+        return [TextContent(type="text", text=f"Error getting deployment logs: {str(e)}")]
 
 
 async def main() -> None:

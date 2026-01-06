@@ -100,6 +100,67 @@ class OKEClusterInfo:
     node_pools: List[OKENodePoolInfo] = field(default_factory=list)
 
 
+@dataclass
+class DevOpsProjectInfo:
+    """Summary information about a DevOps project."""
+
+    project_id: str
+    name: str
+    description: Optional[str] = None
+    compartment_id: Optional[str] = None
+    lifecycle_state: Optional[str] = None
+    time_created: Optional[str] = None
+    notification_config: Optional[Dict[str, Any]] = None
+
+
+@dataclass
+class DeploymentPipelineInfo:
+    """Summary information about a deployment pipeline."""
+
+    pipeline_id: str
+    display_name: str
+    project_id: Optional[str] = None
+    compartment_id: Optional[str] = None
+    description: Optional[str] = None
+    lifecycle_state: Optional[str] = None
+    time_created: Optional[str] = None
+    time_updated: Optional[str] = None
+
+
+@dataclass
+class DeploymentStageInfo:
+    """Information about a deployment stage execution."""
+
+    stage_id: Optional[str] = None
+    display_name: Optional[str] = None
+    stage_type: Optional[str] = None
+    status: Optional[str] = None
+    time_started: Optional[str] = None
+    time_finished: Optional[str] = None
+    deployment_stage_predecessors: Optional[List[str]] = None
+
+
+@dataclass
+class DeploymentInfo:
+    """Detailed information about a deployment."""
+
+    deployment_id: str
+    display_name: Optional[str] = None
+    deployment_type: Optional[str] = None
+    deploy_pipeline_id: Optional[str] = None
+    compartment_id: Optional[str] = None
+    lifecycle_state: Optional[str] = None
+    lifecycle_details: Optional[str] = None
+    time_created: Optional[str] = None
+    time_started: Optional[str] = None
+    time_finished: Optional[str] = None
+    deployment_execution_progress: Optional[Dict[str, Any]] = None
+    deployment_arguments: Optional[Dict[str, Any]] = None
+    deploy_artifact_override_arguments: Optional[Dict[str, Any]] = None
+    freeform_tags: Optional[Dict[str, str]] = None
+    defined_tags: Optional[Dict[str, Dict[str, Any]]] = None
+
+
 class OCIConfig(BaseModel):
     """OCI configuration model with validation."""
 
