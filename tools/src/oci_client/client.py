@@ -18,6 +18,9 @@ from .models import (
     AuthType,
     BastionInfo,
     BastionType,
+    DeploymentInfo,
+    DeploymentPipelineInfo,
+    DevOpsProjectInfo,
     InstanceInfo,
     LifecycleState,
     OKEClusterInfo,
@@ -167,6 +170,7 @@ class OCIClient:
         self._network_client: Optional[oci.core.VirtualNetworkClient] = None
         self._object_storage_client: Optional[oci.object_storage.ObjectStorageClient] = None
         self._container_engine_client: Optional[oci.container_engine.ContainerEngineClient] = None
+        self._devops_client: Optional[oci.devops.DevopsClient] = None
 
         # Authenticate
         self._authenticate()
@@ -232,6 +236,15 @@ class OCIClient:
                 self.oci_config, signer=self.signer, retry_strategy=self.retry_strategy
             )
         return self._container_engine_client
+
+    @property
+    def devops_client(self) -> oci.devops.DevopsClient:
+        """Lazy-load DevOps client."""
+        if not self._devops_client:
+            self._devops_client = oci.devops.DevopsClient(
+                self.oci_config, signer=self.signer, retry_strategy=self.retry_strategy
+            )
+        return self._devops_client
 
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
     def test_connection(self) -> bool:
@@ -1194,3 +1207,309 @@ class OCIClient:
         """Context manager exit - cleanup resources."""
         # Close any open clients
         pass
+
+    # ========== DevOps Operations ==========
+
+    def list_devops_projects(
+        self,
+        compartment_id: str,
+        lifecycle_state: Optional[str] = None,
+    ) -> List[DevOpsProjectInfo]:
+        """
+        List DevOps projects in a compartment.
+
+        Args:
+            compartment_id: The compartment OCID to search in
+            lifecycle_state: Optional filter by lifecycle state (e.g., 'ACTIVE')
+
+        Returns:
+            List of DevOpsProjectInfo objects
+        """
+        try:
+            devops = self.devops_client
+            request_kwargs: Dict[str, Any] = {"compartment_id": compartment_id}
+            if lifecycle_state:
+                request_kwargs["lifecycle_state"] = lifecycle_state
+
+            response = list_call_get_all_results(devops.list_projects, **request_kwargs)
+            projects: List[DevOpsProjectInfo] = []
+
+            for project in getattr(response, "data", []) or []:
+                project_id = getattr(project, "id", None)
+                if not project_id:
+                    continue
+
+                notification_config = getattr(project, "notification_config", None)
+                notification_dict = None
+                if notification_config:
+                    notification_dict = {
+                        "topic_id": getattr(notification_config, "topic_id", None),
+                    }
+
+                project_info = DevOpsProjectInfo(
+                    project_id=project_id,
+                    name=getattr(project, "name", project_id),
+                    description=getattr(project, "description", None),
+                    compartment_id=getattr(project, "compartment_id", compartment_id),
+                    lifecycle_state=getattr(project, "lifecycle_state", None),
+                    time_created=str(getattr(project, "time_created", None)),
+                    notification_config=notification_dict,
+                )
+                projects.append(project_info)
+
+            return projects
+
+        except Exception as e:
+            logger.error(f"Failed to list DevOps projects in compartment {compartment_id}: {e}")
+            raise RuntimeError(
+                f"Failed to list DevOps projects in compartment {compartment_id}: {e}"
+            ) from e
+
+    def list_deployment_pipelines(
+        self,
+        compartment_id: Optional[str] = None,
+        project_id: Optional[str] = None,
+        lifecycle_state: Optional[str] = None,
+    ) -> List[DeploymentPipelineInfo]:
+        """
+        List deployment pipelines.
+
+        Args:
+            compartment_id: Optional compartment OCID to filter by
+            project_id: Optional DevOps project OCID to filter by
+            lifecycle_state: Optional filter by lifecycle state
+
+        Returns:
+            List of DeploymentPipelineInfo objects
+        """
+        try:
+            devops = self.devops_client
+            request_kwargs: Dict[str, Any] = {}
+            if compartment_id:
+                request_kwargs["compartment_id"] = compartment_id
+            if project_id:
+                request_kwargs["project_id"] = project_id
+            if lifecycle_state:
+                request_kwargs["lifecycle_state"] = lifecycle_state
+
+            response = list_call_get_all_results(devops.list_deploy_pipelines, **request_kwargs)
+            pipelines: List[DeploymentPipelineInfo] = []
+
+            for pipeline in getattr(response, "data", []) or []:
+                pipeline_id = getattr(pipeline, "id", None)
+                if not pipeline_id:
+                    continue
+
+                pipeline_info = DeploymentPipelineInfo(
+                    pipeline_id=pipeline_id,
+                    display_name=getattr(pipeline, "display_name", pipeline_id),
+                    project_id=getattr(pipeline, "project_id", None),
+                    compartment_id=getattr(pipeline, "compartment_id", None),
+                    description=getattr(pipeline, "description", None),
+                    lifecycle_state=getattr(pipeline, "lifecycle_state", None),
+                    time_created=str(getattr(pipeline, "time_created", None)),
+                    time_updated=str(getattr(pipeline, "time_updated", None)),
+                )
+                pipelines.append(pipeline_info)
+
+            return pipelines
+
+        except Exception as e:
+            logger.error(f"Failed to list deployment pipelines: {e}")
+            raise RuntimeError(f"Failed to list deployment pipelines: {e}") from e
+
+    def get_recent_deployment(
+        self,
+        deploy_pipeline_id: str,
+        limit: int = 1,
+    ) -> List[DeploymentInfo]:
+        """
+        Get the most recent deployment(s) for a deployment pipeline.
+
+        Args:
+            deploy_pipeline_id: The deployment pipeline OCID
+            limit: Number of recent deployments to retrieve (default: 1)
+
+        Returns:
+            List of DeploymentInfo objects sorted by most recent first
+        """
+        try:
+            devops = self.devops_client
+
+            # List deployments for the pipeline, sorted by time created (newest first)
+            response = devops.list_deployments(
+                deploy_pipeline_id=deploy_pipeline_id,
+                sort_by="timeCreated",
+                sort_order="DESC",
+                limit=limit,
+            )
+
+            deployments: List[DeploymentInfo] = []
+
+            for deployment in getattr(response, "data", []) or []:
+                deployment_id = getattr(deployment, "id", None)
+                if not deployment_id:
+                    continue
+
+                # Get full deployment details for execution progress
+                try:
+                    detail_response = devops.get_deployment(deployment_id)
+                    deployment_detail = detail_response.data
+                except Exception as detail_error:
+                    logger.warning(
+                        f"Could not fetch deployment details for {deployment_id}: {detail_error}"
+                    )
+                    deployment_detail = deployment
+
+                # Parse execution progress
+                execution_progress = getattr(deployment_detail, "deployment_execution_progress", None)
+                execution_progress_dict = None
+                if execution_progress:
+                    execution_progress_dict = {
+                        "time_started": str(getattr(execution_progress, "time_started", None)),
+                        "time_finished": str(getattr(execution_progress, "time_finished", None)),
+                        "deploy_stage_execution_progress": {},
+                    }
+                    stage_progress = getattr(
+                        execution_progress, "deploy_stage_execution_progress", {}
+                    )
+                    if stage_progress:
+                        for stage_id, stage_info in stage_progress.items():
+                            execution_progress_dict["deploy_stage_execution_progress"][stage_id] = {
+                                "deploy_stage_display_name": getattr(
+                                    stage_info, "deploy_stage_display_name", None
+                                ),
+                                "deploy_stage_type": getattr(stage_info, "deploy_stage_type", None),
+                                "status": getattr(stage_info, "status", None),
+                                "time_started": str(getattr(stage_info, "time_started", None)),
+                                "time_finished": str(getattr(stage_info, "time_finished", None)),
+                            }
+
+                # Parse deployment arguments
+                deployment_args = getattr(deployment_detail, "deployment_arguments", None)
+                deployment_args_dict = None
+                if deployment_args:
+                    items = getattr(deployment_args, "items", []) or []
+                    deployment_args_dict = {
+                        "items": [
+                            {
+                                "name": getattr(item, "name", None),
+                                "value": getattr(item, "value", None),
+                            }
+                            for item in items
+                        ]
+                    }
+
+                deployment_info = DeploymentInfo(
+                    deployment_id=deployment_id,
+                    display_name=getattr(deployment_detail, "display_name", None),
+                    deployment_type=getattr(deployment_detail, "deployment_type", None),
+                    deploy_pipeline_id=getattr(deployment_detail, "deploy_pipeline_id", None),
+                    compartment_id=getattr(deployment_detail, "compartment_id", None),
+                    lifecycle_state=getattr(deployment_detail, "lifecycle_state", None),
+                    lifecycle_details=getattr(deployment_detail, "lifecycle_details", None),
+                    time_created=str(getattr(deployment_detail, "time_created", None)),
+                    time_started=str(
+                        getattr(
+                            getattr(deployment_detail, "deployment_execution_progress", None),
+                            "time_started",
+                            None,
+                        )
+                    ),
+                    time_finished=str(
+                        getattr(
+                            getattr(deployment_detail, "deployment_execution_progress", None),
+                            "time_finished",
+                            None,
+                        )
+                    ),
+                    deployment_execution_progress=execution_progress_dict,
+                    deployment_arguments=deployment_args_dict,
+                    freeform_tags=getattr(deployment_detail, "freeform_tags", None),
+                    defined_tags=getattr(deployment_detail, "defined_tags", None),
+                )
+                deployments.append(deployment_info)
+
+            return deployments
+
+        except Exception as e:
+            logger.error(f"Failed to get recent deployments for pipeline {deploy_pipeline_id}: {e}")
+            raise RuntimeError(
+                f"Failed to get recent deployments for pipeline {deploy_pipeline_id}: {e}"
+            ) from e
+
+    def get_deployment_logs(
+        self,
+        deployment_id: str,
+    ) -> Dict[str, Any]:
+        """
+        Get logs for a specific deployment.
+
+        Args:
+            deployment_id: The deployment OCID
+
+        Returns:
+            Dictionary containing deployment details and stage-level log information
+        """
+        try:
+            devops = self.devops_client
+
+            # Get deployment details
+            deployment_response = devops.get_deployment(deployment_id)
+            deployment = deployment_response.data
+
+            # Get lifecycle state and details
+            lifecycle_state = getattr(deployment, "lifecycle_state", None)
+            lifecycle_details = getattr(deployment, "lifecycle_details", None)
+
+            # Get execution progress for stage-level details
+            execution_progress = getattr(deployment, "deployment_execution_progress", None)
+            stages_info = []
+            failed_stages = []
+
+            if execution_progress:
+                stage_progress = getattr(execution_progress, "deploy_stage_execution_progress", {})
+                if stage_progress:
+                    for stage_id, stage_info in stage_progress.items():
+                        stage_data = {
+                            "stage_id": stage_id,
+                            "display_name": getattr(stage_info, "deploy_stage_display_name", None),
+                            "stage_type": getattr(stage_info, "deploy_stage_type", None),
+                            "status": getattr(stage_info, "status", None),
+                            "time_started": str(getattr(stage_info, "time_started", None)),
+                            "time_finished": str(getattr(stage_info, "time_finished", None)),
+                        }
+
+                        # Check for stage-specific error messages
+                        status = getattr(stage_info, "status", None)
+                        if status in ("FAILED", "CANCELED", "ROLLBACK_FAILED"):
+                            # Try to get more details from the stage
+                            stage_data["error_details"] = lifecycle_details
+                            failed_stages.append(stage_data)
+
+                        stages_info.append(stage_data)
+
+            result = {
+                "deployment_id": deployment_id,
+                "display_name": getattr(deployment, "display_name", None),
+                "lifecycle_state": lifecycle_state,
+                "lifecycle_details": lifecycle_details,
+                "time_created": str(getattr(deployment, "time_created", None)),
+                "time_started": str(
+                    getattr(execution_progress, "time_started", None) if execution_progress else None
+                ),
+                "time_finished": str(
+                    getattr(execution_progress, "time_finished", None) if execution_progress else None
+                ),
+                "stages": stages_info,
+                "failed_stages": failed_stages,
+                "has_failures": len(failed_stages) > 0 or lifecycle_state == "FAILED",
+                "summary": f"Deployment {lifecycle_state}"
+                + (f": {lifecycle_details}" if lifecycle_details else ""),
+            }
+
+            return result
+
+        except Exception as e:
+            logger.error(f"Failed to get deployment logs for {deployment_id}: {e}")
+            raise RuntimeError(f"Failed to get deployment logs for {deployment_id}: {e}") from e
