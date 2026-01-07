@@ -18,6 +18,8 @@ This plugin extends [OpenCode CLI](https://opencode.ai) with specialized tools, 
 - **Control Plane Upgrades**: Upgrade OKE cluster control planes to latest versions
 - **Node Pool Management**: Upgrade node pool configurations and cycle workers
 - **Image Updates**: Cycle node pools to apply new node images
+- **Node-Level Observability**: List individual nodes, check health states, and detect image updates
+- **DevOps Deployment Monitoring**: List DevOps projects, pipelines, and check deployment status with detailed logs
 - **Safety Controls**: Built-in dry-run support and approval checkpoints for mutating operations
 
 ---
@@ -201,15 +203,19 @@ cp AGENTS.md ~/.config/opencode/AGENTS.md
 │  │                 │    │ upgrade_oke_cluster                 │ │
 │  │ Guides AI       │    │ upgrade_node_pool                   │ │
 │  │ through the     │    │ cycle_node_pool                     │ │
-│  │ correct order   │    │                                     │ │
-│  │ of operations   │    │ Executes actual OCI API calls       │ │
+│  │ correct order   │    │ list_cluster_nodes                  │ │
+│  │ of operations   │    │ get_node_pool_details               │ │
 │  ├─────────────────┤    ├─────────────────────────────────────┤ │
-│  │ oke-node-       │───▶│ list_oke_clusters                   │ │
-│  │ upgrade         │    │ list_node_pools                     │ │
+│  │ oke-node-       │───▶│ list_node_pools                     │ │
+│  │ upgrade         │    │ check_node_image_updates            │ │
 │  │                 │    │ cycle_node_pool                     │ │
 │  │ Guides AI       │    │ get_oke_version_report              │ │
-│  │ through node    │    │                                     │ │
-│  │ image updates   │    │ Executes actual OCI API calls       │ │
+│  │ through node    │    ├─────────────────────────────────────┤ │
+│  │ image updates   │    │ DevOps Tools:                       │ │
+│  │                 │    │ list_devops_projects                │ │
+│  │                 │    │ list_deployment_pipelines           │ │
+│  │                 │    │ get_recent_deployment               │ │
+│  │                 │    │ get_deployment_logs                 │ │
 │  └─────────────────┘    └─────────────────────────────────────┘ │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -229,6 +235,18 @@ cp AGENTS.md ~/.config/opencode/AGENTS.md
 | `get_oke_cluster_details` | Get detailed cluster info | `project`, `stage`, `region`, `cluster_id` |
 | `list_node_pools` | List node pools for a cluster | `project`, `stage`, `region`, `cluster_id` |
 | `get_oke_version_report` | Generate version report | `project`, `stage` |
+| `list_cluster_nodes` | List all worker nodes for a cluster | `project`, `stage`, `region`, `cluster_id` |
+| `get_node_pool_details` | Get detailed node pool info including nodes | `project`, `stage`, `region`, `node_pool_id` |
+| `check_node_image_updates` | Check which nodes have newer OS images | `project`, `stage`, `region`, `cluster_id` (optional) |
+
+### DevOps Operations
+
+| Tool | Description | Parameters |
+|------|-------------|------------|
+| `list_devops_projects` | List all DevOps projects in a compartment | `project`, `stage`, `region` |
+| `list_deployment_pipelines` | List deployment pipelines | `project`, `stage`, `region`, `devops_project_id` (optional) |
+| `get_recent_deployment` | Get most recent deployment status | `project`, `stage`, `region`, `pipeline_id`, `limit` |
+| `get_deployment_logs` | Get detailed stage-by-stage deployment logs | `project`, `stage`, `region`, `deployment_id` |
 
 ### Mutating Operations (Require User Approval)
 
@@ -280,7 +298,8 @@ Get details for cluster X and show me available upgrades
 
 | Operation Type | Tools | Approval Required |
 |---------------|-------|-------------------|
-| Read-only | `list_oke_clusters`, `get_oke_cluster_details`, `list_node_pools`, `get_oke_version_report` | No |
+| Read-only (OKE) | `list_oke_clusters`, `get_oke_cluster_details`, `list_node_pools`, `get_oke_version_report`, `list_cluster_nodes`, `get_node_pool_details`, `check_node_image_updates` | No |
+| Read-only (DevOps) | `list_devops_projects`, `list_deployment_pipelines`, `get_recent_deployment`, `get_deployment_logs` | No |
 | **Mutating** | `upgrade_oke_cluster`, `upgrade_node_pool`, `cycle_node_pool` | **YES** |
 
 ### Approval Workflow
