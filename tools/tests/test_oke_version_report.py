@@ -1,7 +1,6 @@
 from datetime import datetime, timezone
 
 from oci_client.models import OKEClusterInfo, OKENodePoolInfo
-
 from oke_version_report import ClusterReportEntry, generate_html_report
 
 

@@ -4,9 +4,9 @@ from typing import List
 import pytest
 
 import oke_node_cycle
+from oci_client.models import OKEClusterInfo, OKENodePoolInfo
 from oke_node_cycle import NodeCycleResult, perform_node_cycles
 from oke_upgrade import ReportCluster
-from oci_client.models import OKEClusterInfo, OKENodePoolInfo
 
 
 @pytest.fixture
@@ -60,7 +60,9 @@ def test_perform_node_cycles_triggers_replace_boot_volume(monkeypatch, sample_en
         ),
     )
 
-    monkeypatch.setattr("oke_node_cycle.setup_session_token", lambda project, stage, region: "profile")
+    monkeypatch.setattr(
+        "oke_node_cycle.setup_session_token", lambda project, stage, region: "profile"
+    )
     monkeypatch.setattr("oke_node_cycle.create_oci_client", lambda region, profile: fake_client)
 
     results = perform_node_cycles(
@@ -99,7 +101,9 @@ def test_perform_node_cycles_dry_run(monkeypatch, sample_entry):
         ),
     )
 
-    monkeypatch.setattr("oke_node_cycle.setup_session_token", lambda project, stage, region: "profile")
+    monkeypatch.setattr(
+        "oke_node_cycle.setup_session_token", lambda project, stage, region: "profile"
+    )
     monkeypatch.setattr("oke_node_cycle.create_oci_client", lambda region, profile: fake_client)
 
     results = perform_node_cycles(
@@ -117,7 +121,9 @@ def test_perform_node_cycles_dry_run(monkeypatch, sample_entry):
 
 def test_perform_node_cycles_respects_maximum_unavailable(monkeypatch, sample_entry):
     nodes = [
-        SimpleNamespace(id=f"ocid1.instance.oc1..node{i}", name=f"node-{i}", lifecycle_state="ACTIVE")
+        SimpleNamespace(
+            id=f"ocid1.instance.oc1..node{i}", name=f"node-{i}", lifecycle_state="ACTIVE"
+        )
         for i in range(1, 5)
     ]
 
@@ -137,7 +143,9 @@ def test_perform_node_cycles_respects_maximum_unavailable(monkeypatch, sample_en
         ),
     )
 
-    monkeypatch.setattr("oke_node_cycle.setup_session_token", lambda project, stage, region: "profile")
+    monkeypatch.setattr(
+        "oke_node_cycle.setup_session_token", lambda project, stage, region: "profile"
+    )
     monkeypatch.setattr("oke_node_cycle.create_oci_client", lambda region, profile: fake_client)
 
     results = perform_node_cycles(
@@ -151,6 +159,8 @@ def test_perform_node_cycles_respects_maximum_unavailable(monkeypatch, sample_en
     pool_id, details = fake_ce.update_calls[0]
     assert pool_id == "ocid1.nodepool.oc1..np-max"
     assert details.node_pool_cycling_details.maximum_unavailable == "2"
+
+
 def test_diagnose_report_flags_short_rows(tmp_path):
     html = """<!DOCTYPE html>
 <html><body>

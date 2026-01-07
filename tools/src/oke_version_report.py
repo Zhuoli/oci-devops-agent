@@ -128,7 +128,9 @@ def collect_cluster_entries(
     return entries
 
 
-def _format_node_pools(node_pools: Sequence, default_text: str = "No node pools discovered.") -> str:
+def _format_node_pools(
+    node_pools: Sequence, default_text: str = "No node pools discovered."
+) -> str:
     """Render node pool information as HTML."""
     if not node_pools:
         return f"<em>{escape(default_text)}</em>"
@@ -269,7 +271,9 @@ def main() -> int:
         f"[bold green]✅ Report complete.[/bold green] Saved to [cyan]{output_path}[/cyan]"
     )
     if not entries:
-        console.print("[yellow]No clusters discovered. Verify meta.yaml or OCI permissions.[/yellow]")
+        console.print(
+            "[yellow]No clusters discovered. Verify meta.yaml or OCI permissions.[/yellow]"
+        )
 
     return 0
 

@@ -24,7 +24,9 @@ def _write_temp_report(tmp_path: Path, rows: List[str]) -> Path:
   </table>
 </body>
 </html>
-""".format(rows="\n".join(rows))
+""".format(
+        rows="\n".join(rows)
+    )
     report_path = tmp_path / "report.html"
     report_path.write_text(html, encoding="utf-8")
     return report_path
@@ -163,7 +165,9 @@ def test_perform_cluster_upgrades_triggers_upgrade(monkeypatch: pytest.MonkeyPat
     assert results[0].work_request_id == "work-request-123"
 
 
-def test_perform_cluster_upgrades_uses_container_engine_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_perform_cluster_upgrades_uses_container_engine_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     entry = ReportCluster(
         project="project-alpha",
         stage="dev",
@@ -263,7 +267,9 @@ def test_perform_cluster_upgrades_falls_back_to_latest(monkeypatch: pytest.Monke
     assert results[0].target_version == "v1.34.1"
 
 
-def test_perform_cluster_upgrades_marks_skip_when_no_upgrades(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_perform_cluster_upgrades_marks_skip_when_no_upgrades(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     entry = ReportCluster(
         project="project-beta",
         stage="dev",
@@ -312,7 +318,9 @@ def test_perform_cluster_upgrades_marks_skip_when_no_upgrades(monkeypatch: pytes
     assert results[0].target_version is None
 
 
-def test_perform_cluster_upgrades_processes_multiple_entries(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_perform_cluster_upgrades_processes_multiple_entries(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     entries = [
         ReportCluster(
             project="project-beta",
@@ -395,6 +403,12 @@ def test_perform_cluster_upgrades_processes_multiple_entries(monkeypatch: pytest
     assert len(results) == 3
     assert all(result.success for result in results)
     assert [r.skipped for r in results] == [False, False, False]
-    assert fake_clients[("project-beta", "dev", "us-phoenix-1")].calls == [("ocid1.cluster.oc1..phx", "v1.34.1")]
-    assert fake_clients[("project-beta", "dev", "us-ashburn-1")].calls == [("ocid1.cluster.oc1..iad", "v1.33.1")]
-    assert fake_clients[("project-beta", "dev", "eu-frankfurt-1")].calls == [("ocid1.cluster.oc1..fra", "v1.33.1")]
+    assert fake_clients[("project-beta", "dev", "us-phoenix-1")].calls == [
+        ("ocid1.cluster.oc1..phx", "v1.34.1")
+    ]
+    assert fake_clients[("project-beta", "dev", "us-ashburn-1")].calls == [
+        ("ocid1.cluster.oc1..iad", "v1.33.1")
+    ]
+    assert fake_clients[("project-beta", "dev", "eu-frankfurt-1")].calls == [
+        ("ocid1.cluster.oc1..fra", "v1.33.1")
+    ]

@@ -1,6 +1,6 @@
 import sys
 from pathlib import Path
-from typing import Iterable, List, Optional, Tuple, Any
+from typing import Any, Iterable, List, Optional, Tuple
 
 try:
     # OCI SDK
@@ -9,15 +9,17 @@ except Exception as e:  # pragma: no cover
     print(f"Failed to import OCI SDK: {e}", file=sys.stderr)
     sys.exit(1)
 
-# Reuse existing project utilities
-from oci_client.utils.yamler import get_region_compartment_pairs  # type: ignore
-from oci_client.utils.session import setup_session_token, create_oci_client  # type: ignore
+import csv
+from pathlib import Path
 
 # Optional: use rich for output
 from rich.console import Console
 from rich.table import Table
-import csv
-from pathlib import Path
+
+from oci_client.utils.session import create_oci_client, setup_session_token  # type: ignore
+
+# Reuse existing project utilities
+from oci_client.utils.yamler import get_region_compartment_pairs  # type: ignore
 
 console = Console()
 MISSING = "—"
@@ -108,7 +110,9 @@ def _build_client_for_region(project: str, stage: str, region: str):
     # Create an OCIClient using that profile
     client = create_oci_client(region=region, profile_name=profile_name)
     if client is None:
-        raise RuntimeError(f"Failed to initialize OCI client for region {region} and profile {profile_name}")
+        raise RuntimeError(
+            f"Failed to initialize OCI client for region {region} and profile {profile_name}"
+        )
     return client
 
 
@@ -146,7 +150,9 @@ def _format_defined_tags(dt: Any) -> str:
     return "; ".join(parts)
 
 
-def _safe_get_defined_tag(resource, namespace: str, key: str, verbose: bool = True) -> Optional[str]:
+def _safe_get_defined_tag(
+    resource, namespace: str, key: str, verbose: bool = True
+) -> Optional[str]:
     """
     Attempt to fetch a defined tag, with detailed diagnostics when not found.
     Logs why retrieval failed and prints all existing defined tags on the resource.
@@ -179,7 +185,9 @@ def _safe_get_defined_tag(resource, namespace: str, key: str, verbose: bool = Tr
                 f"[yellow]{res_type} '{res_label}': namespace '{namespace}' not found in defined_tags. "
                 f"Available namespaces: {available_namespaces}[/yellow]"
             )
-            console.print(f"[dim]{res_type} '{res_label}' defined_tags: {_format_defined_tags(dt)}[/dim]")
+            console.print(
+                f"[dim]{res_type} '{res_label}' defined_tags: {_format_defined_tags(dt)}[/dim]"
+            )
         return None
 
     if key not in ns:
@@ -189,7 +197,9 @@ def _safe_get_defined_tag(resource, namespace: str, key: str, verbose: bool = Tr
                 f"[yellow]{res_type} '{res_label}': key '{key}' not found in namespace '{namespace}'. "
                 f"Available keys in namespace: {available_keys}[/yellow]"
             )
-            console.print(f"[dim]{res_type} '{res_label}' defined_tags[{namespace}]: {_format_defined_tags({namespace: ns})}[/dim]")
+            console.print(
+                f"[dim]{res_type} '{res_label}' defined_tags[{namespace}]: {_format_defined_tags({namespace: ns})}[/dim]"
+            )
         return None
 
     val = ns.get(key)
@@ -199,7 +209,9 @@ def _safe_get_defined_tag(resource, namespace: str, key: str, verbose: bool = Tr
                 f"[yellow]{res_type} '{res_label}': value for defined_tags.{namespace}.{key} is not a string "
                 f"(type={type(val).__name__}, value={val!r})[/yellow]"
             )
-            console.print(f"[dim]{res_type} '{res_label}' defined_tags[{namespace}]: {_format_defined_tags({namespace: ns})}[/dim]")
+            console.print(
+                f"[dim]{res_type} '{res_label}' defined_tags[{namespace}]: {_format_defined_tags({namespace: ns})}[/dim]"
+            )
         return None
 
     return val
@@ -234,7 +246,9 @@ def _find_latest_image_with_same_type(
             sort_order="DESC",
         ).data
     except Exception as e:
-        console.print(f"[red]Failed to list images in compartment {image_compartment_id}: {e}[/red]")
+        console.print(
+            f"[red]Failed to list images in compartment {image_compartment_id}: {e}[/red]"
+        )
         return None
 
     for img in images:
@@ -279,7 +293,9 @@ def _collect_instances_with_images(
         return []
 
     if not instances:
-        console.print(f"[yellow]No RUNNING instances found in region {region}, compartment {compartment_id}[/yellow]")
+        console.print(
+            f"[yellow]No RUNNING instances found in region {region}, compartment {compartment_id}[/yellow]"
+        )
 
     results: List[Tuple[str, str, str, str, str]] = []
 
@@ -295,14 +311,18 @@ def _collect_instances_with_images(
         image_id = getattr(inst, "image_id", None)
         image = None
         if not image_id:
-            console.print(f"[yellow]Instance '{instance_name}' ({hostname}) has no image_id; skipping newer-image check[/yellow]")
+            console.print(
+                f"[yellow]Instance '{instance_name}' ({hostname}) has no image_id; skipping newer-image check[/yellow]"
+            )
         else:
             try:
                 image = compute_client.get_image(image_id).data
                 current_image_name = getattr(image, "display_name", "") or image_id
             except Exception as e:
                 current_image_name = image_id
-                console.print(f"[yellow]Instance '{instance_name}' ({hostname}): failed to fetch image '{image_id}': {e}[/yellow]")
+                console.print(
+                    f"[yellow]Instance '{instance_name}' ({hostname}): failed to fetch image '{image_id}': {e}[/yellow]"
+                )
 
         # If we have image info, try to find newer
         if image:
@@ -324,7 +344,9 @@ def _collect_instances_with_images(
                 )
             else:
                 latest_image = _find_latest_image_with_same_type(
-                    compute_client, image_compartment_id=image_compartment_id, target_type=image_type
+                    compute_client,
+                    image_compartment_id=image_compartment_id,
+                    target_type=image_type,
                 )
                 if not latest_image:
                     console.print(
@@ -332,7 +354,9 @@ def _collect_instances_with_images(
                     )
                 else:
                     # compute candidate name
-                    candidate_name = getattr(latest_image, "display_name", "") or getattr(latest_image, "id", "")
+                    candidate_name = getattr(latest_image, "display_name", "") or getattr(
+                        latest_image, "id", ""
+                    )
                     if not candidate_name:
                         console.print(
                             f"[dim]Instance '{instance_name}' ({hostname}): LATEST image found but has no display_name or id; cannot compare[/dim]"
@@ -347,7 +371,9 @@ def _collect_instances_with_images(
                             f"[green]Instance '{instance_name}' ({hostname}): newer image available -> '{newer_image_name}' (current '{current_image_name}')[/green]"
                         )
 
-        results.append((hostname, region, inst.compartment_id, current_image_name, newer_image_name))
+        results.append(
+            (hostname, region, inst.compartment_id, current_image_name, newer_image_name)
+        )
 
     return results
 
@@ -370,7 +396,9 @@ def main(argv: List[str]) -> int:
 
     region_compartment_list = _flatten_region_compartment_pairs(pairs)
     if not region_compartment_list:
-        console.print(f"[yellow]No regions/compartments found for project={project}, stage={stage}[/yellow]")
+        console.print(
+            f"[yellow]No regions/compartments found for project={project}, stage={stage}[/yellow]"
+        )
         # Still print an empty table for consistency
         table = Table(title=f"Image Updates for Project '{project}' Stage '{stage}'")
         table.add_column("Host name", style="bold")
@@ -402,19 +430,23 @@ def main(argv: List[str]) -> int:
     # Write CSV file at project root
     csv_filename = Path(__file__).parent.parent.parent / "oci_image_updates_report.csv"
     try:
-        with open(csv_filename, "w", newline='', encoding="utf-8") as csvfile:
+        with open(csv_filename, "w", newline="", encoding="utf-8") as csvfile:
             writer = csv.writer(csvfile)
-            writer.writerow(["Host name", "Region", "Compartment ID", "Current Image", "Newer Available Image"])
+            writer.writerow(
+                ["Host name", "Region", "Compartment ID", "Current Image", "Newer Available Image"]
+            )
             for hostname, region, comp_id, current_img, newer_img in all_rows:
                 writer.writerow([hostname, region, comp_id, current_img, newer_img])
         console.print(f"[green]CSV report saved to {csv_filename}[/green]")
     except Exception as e:
         console.print(f"[red]Failed to write CSV report: {e}[/red]")
-    
+
     # Optional summary
     newer_count = sum(1 for _, _, _, _, newer in all_rows if newer and newer != MISSING)
     total_instances = len(all_rows)
-    console.print(f"[dim]Summary: {newer_count} of {total_instances} running instances have a newer image available.[/dim]")
+    console.print(
+        f"[dim]Summary: {newer_count} of {total_instances} running instances have a newer image available.[/dim]"
+    )
 
     return 0
 

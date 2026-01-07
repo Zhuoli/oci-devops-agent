@@ -32,7 +32,9 @@ def test_bucket_deletion_removes_versions_and_bucket():
     command._max_delete_workers = 1
     object_storage = Mock()
     object_storage.get_namespace.return_value = SimpleNamespace(data="namespace")
-    object_storage.get_bucket.return_value = SimpleNamespace(data=SimpleNamespace(versioning="Enabled"))
+    object_storage.get_bucket.return_value = SimpleNamespace(
+        data=SimpleNamespace(versioning="Enabled")
+    )
 
     versions_page1 = FakeResponse(
         FakeCollection(
@@ -49,7 +51,11 @@ def test_bucket_deletion_removes_versions_and_bucket():
         )
     )
     empty_versions = FakeResponse(FakeCollection(objects=[]))
-    object_storage.list_object_versions.side_effect = [versions_page1, versions_page2, empty_versions]
+    object_storage.list_object_versions.side_effect = [
+        versions_page1,
+        versions_page2,
+        empty_versions,
+    ]
 
     empty_objects = FakeResponse(FakeCollection(objects=[]))
     object_storage.list_objects.return_value = empty_objects
@@ -68,7 +74,9 @@ def test_bucket_deletion_handles_standard_bucket_objects():
     command._max_delete_workers = 1
     object_storage = Mock()
     object_storage.get_namespace.return_value = SimpleNamespace(data="namespace")
-    object_storage.get_bucket.return_value = SimpleNamespace(data=SimpleNamespace(versioning="Disabled"))
+    object_storage.get_bucket.return_value = SimpleNamespace(
+        data=SimpleNamespace(versioning="Disabled")
+    )
 
     page1_objects = FakeResponse(
         FakeCollection(
@@ -81,7 +89,12 @@ def test_bucket_deletion_handles_standard_bucket_objects():
     )
     page2_objects = FakeResponse(FakeCollection(objects=[SimpleNamespace(name="file3.txt")]))
     empty_objects = FakeResponse(FakeCollection(objects=[]))
-    object_storage.list_objects.side_effect = [page1_objects, page2_objects, empty_objects, empty_objects]
+    object_storage.list_objects.side_effect = [
+        page1_objects,
+        page2_objects,
+        empty_objects,
+        empty_objects,
+    ]
 
     client = SimpleNamespace(object_storage_client=object_storage)
     args = SimpleNamespace(bucket_name="bucket", namespace=None)
@@ -116,7 +129,9 @@ def test_bucket_deletion_surfaces_remaining_objects_error():
     command = BucketDeletionCommand()
     object_storage = Mock()
     object_storage.get_namespace.return_value = SimpleNamespace(data="namespace")
-    object_storage.get_bucket.return_value = SimpleNamespace(data=SimpleNamespace(versioning="Disabled"))
+    object_storage.get_bucket.return_value = SimpleNamespace(
+        data=SimpleNamespace(versioning="Disabled")
+    )
     object_storage.list_objects.return_value = FakeResponse(FakeCollection(objects=[]))
     object_storage.delete_bucket.side_effect = ServiceError(
         status=409,

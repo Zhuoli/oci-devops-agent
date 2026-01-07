@@ -1,4 +1,4 @@
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 
 import yaml
 
@@ -7,6 +7,10 @@ class ConfigNotFoundError(Exception):
     """Custom exception for configuration not found errors."""
 
     pass
+
+
+# Reserved keys at the realm level (not region names)
+REALM_RESERVED_KEYS = {"tenancy-ocid", "tenancy-name"}
 
 
 def get_compartment_id(
@@ -73,9 +77,10 @@ def get_compartment_id(
         )
     error_path.append(realm)
 
-    # Check if region exists
-    if region not in config["projects"][project_name][stage][realm]:
-        available_regions = list(config["projects"][project_name][stage][realm].keys())
+    # Check if region exists (excluding reserved keys like tenancy-ocid, tenancy-name)
+    realm_config = config["projects"][project_name][stage][realm]
+    if region not in realm_config or region in REALM_RESERVED_KEYS:
+        available_regions = [k for k in realm_config.keys() if k not in REALM_RESERVED_KEYS]
         raise ConfigNotFoundError(
             f"Region '{region}' not found for path projects.{project_name}.{stage}.{realm}. "
             f"Available regions: {', '.join(available_regions)}"
@@ -172,9 +177,12 @@ def get_region_compartment_pairs(
     stage_config = config["projects"][project_name][stage]
 
     # Iterate through all realms (oc1, oc16, oc17, etc.)
-    for realm, regions in stage_config.items():
-        # Iterate through all regions in this realm
-        for region, region_config in regions.items():
+    for realm, realm_config in stage_config.items():
+        # Iterate through all regions in this realm (skip reserved keys like tenancy-ocid, tenancy-name)
+        for region, region_config in realm_config.items():
+            # Skip reserved keys (tenancy-ocid, tenancy-name)
+            if region in REALM_RESERVED_KEYS:
+                continue
             if isinstance(region_config, dict) and "compartment_id" in region_config:
                 # Use region as key, compartment_id as value
                 region_compartment_pairs[region] = region_config["compartment_id"]
@@ -204,12 +212,161 @@ def list_available_configs(yaml_file_path: str) -> Dict[str, Any]:
                 available[project] = {}
                 for stage, realms in stages.items():
                     available[project][stage] = {}
-                    for realm, regions in realms.items():
-                        available[project][stage][realm] = list(regions.keys())
+                    for realm, realm_config in realms.items():
+                        # Filter out reserved keys (tenancy-ocid, tenancy-name)
+                        regions = [k for k in realm_config.keys() if k not in REALM_RESERVED_KEYS]
+                        available[project][stage][realm] = regions
 
         return available
     except Exception as e:
         return {"error": str(e)}
+
+
+def get_tenancy_info(
+    yaml_file_path: str, project_name: str, stage: str, realm: str
+) -> Tuple[Optional[str], Optional[str]]:
+    """
+    Get tenancy information (OCID and name) for a given project, stage, and realm.
+
+    Args:
+        yaml_file_path: Path to the YAML configuration file
+        project_name: Name of the project (e.g., 'project-alpha', 'project-beta')
+        stage: Deployment stage (e.g., 'dev', 'staging', 'prod')
+        realm: Realm identifier (e.g., 'oc1', 'oc16', 'oc17')
+
+    Returns:
+        Tuple[Optional[str], Optional[str]]: (tenancy_ocid, tenancy_name) or (None, None) if not found
+
+    Raises:
+        ConfigNotFoundError: If the specified configuration path is not found
+        FileNotFoundError: If the YAML file cannot be found
+        yaml.YAMLError: If the YAML file is malformed
+    """
+    try:
+        with open(yaml_file_path, "r") as file:
+            config = yaml.safe_load(file)
+    except FileNotFoundError:
+        raise FileNotFoundError(f"YAML file not found at path: {yaml_file_path}")
+    except yaml.YAMLError as e:
+        raise yaml.YAMLError(f"Error parsing YAML file: {e}")
+
+    # Check if 'projects' exists
+    if "projects" not in config:
+        raise ConfigNotFoundError("'projects' key not found in configuration")
+
+    # Check if project_name exists
+    if project_name not in config["projects"]:
+        available_projects = list(config["projects"].keys())
+        raise ConfigNotFoundError(
+            f"Project '{project_name}' not found. Available projects: {', '.join(available_projects)}"
+        )
+
+    # Check if stage exists
+    if stage not in config["projects"][project_name]:
+        available_stages = list(config["projects"][project_name].keys())
+        raise ConfigNotFoundError(
+            f"Stage '{stage}' not found for project '{project_name}'. "
+            f"Available stages: {', '.join(available_stages)}"
+        )
+
+    # Check if realm exists
+    if realm not in config["projects"][project_name][stage]:
+        available_realms = list(config["projects"][project_name][stage].keys())
+        raise ConfigNotFoundError(
+            f"Realm '{realm}' not found for path projects.{project_name}.{stage}. "
+            f"Available realms: {', '.join(available_realms)}"
+        )
+
+    realm_config = config["projects"][project_name][stage][realm]
+    tenancy_ocid = realm_config.get("tenancy-ocid")
+    tenancy_name = realm_config.get("tenancy-name")
+
+    return tenancy_ocid, tenancy_name
+
+
+def get_tenancy_info_safe(
+    yaml_file_path: str,
+    project_name: str,
+    stage: str,
+    realm: str,
+    default: Tuple[Optional[str], Optional[str]] = (None, None),
+) -> Tuple[Optional[str], Optional[str]]:
+    """
+    Safe version of get_tenancy_info that returns a default value on error.
+
+    Args:
+        yaml_file_path: Path to the YAML configuration file
+        project_name: Name of the project
+        stage: Deployment stage
+        realm: Realm identifier
+        default: Default value to return if configuration is not found
+
+    Returns:
+        Tuple[Optional[str], Optional[str]]: (tenancy_ocid, tenancy_name) or default if not found
+    """
+    try:
+        return get_tenancy_info(yaml_file_path, project_name, stage, realm)
+    except (ConfigNotFoundError, FileNotFoundError, yaml.YAMLError):
+        return default
+
+
+def get_all_tenancies(
+    yaml_file_path: str, project_name: str, stage: str
+) -> Dict[str, Tuple[Optional[str], Optional[str]]]:
+    """
+    Get all tenancy information for a given project and stage across all realms.
+
+    Args:
+        yaml_file_path: Path to the YAML configuration file
+        project_name: Name of the project (e.g., 'project-alpha', 'project-beta')
+        stage: Deployment stage (e.g., 'dev', 'staging', 'prod')
+
+    Returns:
+        Dict[str, Tuple[Optional[str], Optional[str]]]: Dictionary with realm as key
+            and (tenancy_ocid, tenancy_name) tuple as value
+
+    Raises:
+        ConfigNotFoundError: If the specified project or stage is not found
+        FileNotFoundError: If the YAML file cannot be found
+        yaml.YAMLError: If the YAML file is malformed
+    """
+    try:
+        with open(yaml_file_path, "r") as file:
+            config = yaml.safe_load(file)
+    except FileNotFoundError:
+        raise FileNotFoundError(f"YAML file not found at path: {yaml_file_path}")
+    except yaml.YAMLError as e:
+        raise yaml.YAMLError(f"Error parsing YAML file: {e}")
+
+    # Check if 'projects' exists
+    if "projects" not in config:
+        raise ConfigNotFoundError("'projects' key not found in configuration")
+
+    # Check if project_name exists
+    if project_name not in config["projects"]:
+        available_projects = list(config["projects"].keys())
+        raise ConfigNotFoundError(
+            f"Project '{project_name}' not found. Available projects: {', '.join(available_projects)}"
+        )
+
+    # Check if stage exists
+    if stage not in config["projects"][project_name]:
+        available_stages = list(config["projects"][project_name].keys())
+        raise ConfigNotFoundError(
+            f"Stage '{stage}' not found for project '{project_name}'. "
+            f"Available stages: {', '.join(available_stages)}"
+        )
+
+    # Extract tenancy info from all realms
+    tenancies: Dict[str, Tuple[Optional[str], Optional[str]]] = {}
+    stage_config = config["projects"][project_name][stage]
+
+    for realm, realm_config in stage_config.items():
+        tenancy_ocid = realm_config.get("tenancy-ocid")
+        tenancy_name = realm_config.get("tenancy-name")
+        tenancies[realm] = (tenancy_ocid, tenancy_name)
+
+    return tenancies
 
 
 # Example usage
@@ -251,3 +408,29 @@ if __name__ == "__main__":
             print(f"    Stage: {stage}")
             for realm, regions in realms.items():
                 print(f"      Realm: {realm} -> Regions: {regions}")
+
+    # Example 4: Get tenancy information
+    try:
+        tenancy_ocid, tenancy_name = get_tenancy_info(
+            yaml_file_path="meta.yaml",
+            project_name="project-alpha",
+            stage="dev",
+            realm="oc1",
+        )
+        print(f"\nTenancy OCID: {tenancy_ocid}")
+        print(f"Tenancy Name: {tenancy_name}")
+    except ConfigNotFoundError as e:
+        print(f"Configuration error: {e}")
+
+    # Example 5: Get all tenancies for a project/stage
+    try:
+        tenancies = get_all_tenancies(
+            yaml_file_path="meta.yaml",
+            project_name="project-alpha",
+            stage="prod",
+        )
+        print("\nTenancies for project-alpha/prod:")
+        for realm, (ocid, name) in tenancies.items():
+            print(f"  Realm: {realm} -> OCID: {ocid}, Name: {name}")
+    except ConfigNotFoundError as e:
+        print(f"Configuration error: {e}")

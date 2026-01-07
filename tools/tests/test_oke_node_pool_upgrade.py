@@ -1,6 +1,5 @@
-from typing import Any, List
-
 from types import SimpleNamespace
+from typing import Any, List
 
 import pytest
 
@@ -69,9 +68,7 @@ def test_perform_node_pool_upgrades_dry_run(monkeypatch: pytest.MonkeyPatch) -> 
             assert cluster_id == entry.cluster_ocid
             return cluster_info
 
-        def list_node_pools(
-            self, cluster_id: str, compartment_id: str
-        ) -> List[OKENodePoolInfo]:
+        def list_node_pools(self, cluster_id: str, compartment_id: str) -> List[OKENodePoolInfo]:
             assert cluster_id == entry.cluster_ocid
             assert compartment_id == entry.compartment_ocid
             return node_pools
@@ -168,9 +165,7 @@ def test_perform_node_pool_upgrades_executes(monkeypatch: pytest.MonkeyPatch) ->
         def get_oke_cluster(self, cluster_id: str) -> OKEClusterInfo:
             return cluster_info
 
-        def list_node_pools(
-            self, cluster_id: str, compartment_id: str
-        ) -> List[OKENodePoolInfo]:
+        def list_node_pools(self, cluster_id: str, compartment_id: str) -> List[OKENodePoolInfo]:
             return [node_pool]
 
         def upgrade_oke_node_pool(self, node_pool_id: str, target_version: str) -> str:
@@ -201,7 +196,9 @@ def test_perform_node_pool_upgrades_executes(monkeypatch: pytest.MonkeyPatch) ->
     assert results[0].work_request_id == "wr-123"
 
 
-def test_perform_node_pool_upgrades_handles_missing_get_cluster(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_perform_node_pool_upgrades_handles_missing_get_cluster(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     entry = _sample_entry()
     cluster_info = OKEClusterInfo(
         cluster_id=entry.cluster_ocid,
@@ -223,12 +220,16 @@ def test_perform_node_pool_upgrades_handles_missing_get_cluster(monkeypatch: pyt
             return SimpleNamespace(data=cluster_info)
 
         def list_node_pools(self, cluster_id: str, compartment_id: str) -> Any:
-            return SimpleNamespace(data=[SimpleNamespace(
-                id=node_pool.node_pool_id,
-                name=node_pool.name,
-                kubernetes_version=node_pool.kubernetes_version,
-                lifecycle_state=node_pool.lifecycle_state,
-            )])
+            return SimpleNamespace(
+                data=[
+                    SimpleNamespace(
+                        id=node_pool.node_pool_id,
+                        name=node_pool.name,
+                        kubernetes_version=node_pool.kubernetes_version,
+                        lifecycle_state=node_pool.lifecycle_state,
+                    )
+                ]
+            )
 
         def update_node_pool(self, node_pool_id: str, update_details: Any) -> Any:
             return SimpleNamespace(headers={"opc-work-request-id": "wr-456"})
