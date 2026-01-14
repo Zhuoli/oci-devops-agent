@@ -160,9 +160,46 @@ def _get_compartment_id(
 async def list_tools() -> List[Tool]:
     """Return the list of available tools."""
     return [
+        # ========== OKE Status & Discovery Tools (Start Here) ==========
+        Tool(
+            name="get_oke_status_summary",
+            description=(
+                "Get a comprehensive status overview of all OKE infrastructure in one call. "
+                "START HERE when users ask: 'what OKE clusters do we have?', 'what's the status of our Kubernetes?', "
+                "'are there any upgrades available?', 'do any nodes need updates?', or any general OKE status question. "
+                "Returns: all clusters with versions, available upgrades, node pool health, and nodes needing image updates."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "project": {
+                        "type": "string",
+                        "description": "Project name (e.g., 'project-alpha', 'project-beta')",
+                    },
+                    "stage": {
+                        "type": "string",
+                        "description": "Stage name (e.g., 'dev', 'staging', 'prod')",
+                    },
+                    "region": {
+                        "type": "string",
+                        "description": "OCI region name (e.g., 'us-phoenix-1', 'us-ashburn-1')",
+                    },
+                    "config_file": {
+                        "type": "string",
+                        "description": "Path to meta.yaml config file (default: meta.yaml)",
+                        "default": "meta.yaml",
+                    },
+                },
+                "required": ["project", "stage", "region"],
+            },
+        ),
         Tool(
             name="list_oke_clusters",
-            description="List all OKE clusters for a project, stage, and region. Returns cluster names, versions, and available upgrades.",
+            description=(
+                "List all OKE clusters with their Kubernetes versions, lifecycle states, and available upgrade paths. "
+                "Use when users ask: 'what clusters exist?', 'show me cluster versions', 'which clusters can be upgraded?'. "
+                "For a more comprehensive overview including node health, use get_oke_status_summary instead."
+            ),
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -189,7 +226,11 @@ async def list_tools() -> List[Tool]:
         ),
         Tool(
             name="get_oke_cluster_details",
-            description="Get detailed information about a specific OKE cluster including node pools and available upgrades.",
+            description=(
+                "Get detailed information about a specific OKE cluster including all node pools, their versions, "
+                "and available upgrades. Use when you already know the cluster_id and need deep details about one cluster. "
+                "Use after list_oke_clusters to drill down into a specific cluster."
+            ),
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -219,8 +260,180 @@ async def list_tools() -> List[Tool]:
             },
         ),
         Tool(
+            name="get_oke_version_report",
+            description=(
+                "Generate a comprehensive version report for ALL OKE clusters across ALL regions in a project/stage. "
+                "Use when users ask: 'give me a full version report', 'what versions are running across all regions?', "
+                "'create an upgrade assessment'. Returns cluster and node pool versions for the entire stage."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "project": {
+                        "type": "string",
+                        "description": "Project name",
+                    },
+                    "stage": {
+                        "type": "string",
+                        "description": "Stage name",
+                    },
+                    "config_file": {
+                        "type": "string",
+                        "description": "Path to meta.yaml config file",
+                        "default": "meta.yaml",
+                    },
+                },
+                "required": ["project", "stage"],
+            },
+        ),
+        Tool(
+            name="check_node_image_updates",
+            description=(
+                "Check if any worker nodes have outdated OS images that need updating. "
+                "Use when users ask: 'do os host patch', 'check os host patch status', 'are there host patches needed?', "
+                "'which nodes need patching?', 'are there security patches needed?', 'do nodes need image updates?'. "
+                "Compares current node images against latest available."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "project": {
+                        "type": "string",
+                        "description": "Project name",
+                    },
+                    "stage": {
+                        "type": "string",
+                        "description": "Stage name",
+                    },
+                    "region": {
+                        "type": "string",
+                        "description": "OCI region name",
+                    },
+                    "cluster_id": {
+                        "type": "string",
+                        "description": "OKE cluster OCID (optional - if not provided, checks all instances in compartment)",
+                    },
+                    "config_file": {
+                        "type": "string",
+                        "description": "Path to meta.yaml config file",
+                        "default": "meta.yaml",
+                    },
+                },
+                "required": ["project", "stage", "region"],
+            },
+        ),
+        # ========== OKE Node Pool Tools ==========
+        Tool(
+            name="list_node_pools",
+            description=(
+                "List all node pools for a specific OKE cluster with their Kubernetes versions, node counts, and states. "
+                "Use after identifying a cluster to see its node pool breakdown. "
+                "Requires cluster_id - use list_oke_clusters first if you don't have it."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "project": {
+                        "type": "string",
+                        "description": "Project name",
+                    },
+                    "stage": {
+                        "type": "string",
+                        "description": "Stage name",
+                    },
+                    "region": {
+                        "type": "string",
+                        "description": "OCI region name",
+                    },
+                    "cluster_id": {
+                        "type": "string",
+                        "description": "OKE cluster OCID",
+                    },
+                    "config_file": {
+                        "type": "string",
+                        "description": "Path to meta.yaml config file",
+                        "default": "meta.yaml",
+                    },
+                },
+                "required": ["project", "stage", "region", "cluster_id"],
+            },
+        ),
+        Tool(
+            name="get_node_pool_details",
+            description=(
+                "Get detailed information about a specific node pool including all individual worker nodes and their states. "
+                "Use when you need to see individual node health, IPs, or lifecycle states within a pool."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "project": {
+                        "type": "string",
+                        "description": "Project name",
+                    },
+                    "stage": {
+                        "type": "string",
+                        "description": "Stage name",
+                    },
+                    "region": {
+                        "type": "string",
+                        "description": "OCI region name",
+                    },
+                    "node_pool_id": {
+                        "type": "string",
+                        "description": "OKE node pool OCID",
+                    },
+                    "config_file": {
+                        "type": "string",
+                        "description": "Path to meta.yaml config file",
+                        "default": "meta.yaml",
+                    },
+                },
+                "required": ["project", "stage", "region", "node_pool_id"],
+            },
+        ),
+        Tool(
+            name="list_cluster_nodes",
+            description=(
+                "List all worker nodes (compute instances) for an OKE cluster with lifecycle state, private IP, and node pool membership. "
+                "Use when you need a flat list of all nodes in a cluster regardless of which pool they belong to."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "project": {
+                        "type": "string",
+                        "description": "Project name",
+                    },
+                    "stage": {
+                        "type": "string",
+                        "description": "Stage name",
+                    },
+                    "region": {
+                        "type": "string",
+                        "description": "OCI region name",
+                    },
+                    "cluster_id": {
+                        "type": "string",
+                        "description": "OKE cluster OCID",
+                    },
+                    "config_file": {
+                        "type": "string",
+                        "description": "Path to meta.yaml config file",
+                        "default": "meta.yaml",
+                    },
+                },
+                "required": ["project", "stage", "region", "cluster_id"],
+            },
+        ),
+        # ========== OKE Mutating Operations (Require User Approval) ==========
+        Tool(
             name="upgrade_oke_cluster",
-            description="Upgrade an OKE cluster control plane to a target Kubernetes version. This initiates the upgrade and returns a work request ID for tracking.",
+            description=(
+                "MUTATING: Upgrade an OKE cluster control plane to a target Kubernetes version. "
+                "REQUIRES USER APPROVAL. Always use dry_run=true first to preview changes. "
+                "This upgrades the control plane only; node pools need separate upgrade_node_pool calls."
+            ),
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -259,39 +472,12 @@ async def list_tools() -> List[Tool]:
             },
         ),
         Tool(
-            name="list_node_pools",
-            description="List all node pools for an OKE cluster with their current Kubernetes versions and states.",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "project": {
-                        "type": "string",
-                        "description": "Project name",
-                    },
-                    "stage": {
-                        "type": "string",
-                        "description": "Stage name",
-                    },
-                    "region": {
-                        "type": "string",
-                        "description": "OCI region name",
-                    },
-                    "cluster_id": {
-                        "type": "string",
-                        "description": "OKE cluster OCID",
-                    },
-                    "config_file": {
-                        "type": "string",
-                        "description": "Path to meta.yaml config file",
-                        "default": "meta.yaml",
-                    },
-                },
-                "required": ["project", "stage", "region", "cluster_id"],
-            },
-        ),
-        Tool(
             name="upgrade_node_pool",
-            description="Upgrade an OKE node pool to a target Kubernetes version. This updates the node pool configuration; existing nodes need to be cycled to pick up the new version.",
+            description=(
+                "MUTATING: Upgrade an OKE node pool configuration to a target Kubernetes version. "
+                "REQUIRES USER APPROVAL. Always use dry_run=true first. "
+                "This updates the node pool config only; existing nodes need cycle_node_pool to apply the new version."
+            ),
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -331,7 +517,13 @@ async def list_tools() -> List[Tool]:
         ),
         Tool(
             name="cycle_node_pool",
-            description="Cycle OKE node pool workers by replacing their boot volumes. This is used to apply new images or Kubernetes versions to existing worker nodes.",
+            description=(
+                "MUTATING: Cycle OKE node pool workers by replacing their boot volumes to apply OS host patches, "
+                "new images, or Kubernetes versions. Use when users ask: 'apply os host patch', 'do host patching', "
+                "'patch the nodes', 'roll out os patches', 'cycle nodes for patching'. "
+                "REQUIRES USER APPROVAL. Always use dry_run=true first. "
+                "Nodes are cordoned, drained, terminated, and replaced. Use maximum_unavailable=1 for minimal disruption."
+            ),
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -374,116 +566,98 @@ async def list_tools() -> List[Tool]:
                 "required": ["project", "stage", "region", "node_pool_id"],
             },
         ),
+        # ========== General OCI Infrastructure Tools ==========
         Tool(
-            name="get_oke_version_report",
-            description="Generate a version report for all OKE clusters in a project/stage, showing current versions and available upgrades.",
+            name="get_oci_health_check",
+            description=(
+                "Get a cross-service health summary of OCI infrastructure including OKE clusters, compute instances, "
+                "and DevOps pipelines. START HERE when users ask: 'what's the health of our infrastructure?', "
+                "'is everything running okay?', 'give me an infrastructure overview'."
+            ),
             inputSchema={
                 "type": "object",
                 "properties": {
                     "project": {
                         "type": "string",
-                        "description": "Project name",
+                        "description": "Project name (e.g., 'project-alpha', 'project-beta')",
                     },
                     "stage": {
                         "type": "string",
-                        "description": "Stage name",
-                    },
-                    "config_file": {
-                        "type": "string",
-                        "description": "Path to meta.yaml config file",
-                        "default": "meta.yaml",
-                    },
-                },
-                "required": ["project", "stage"],
-            },
-        ),
-        Tool(
-            name="list_cluster_nodes",
-            description="List all worker nodes (compute instances) for an OKE cluster. Returns node details including lifecycle state, private IP, and node pool membership.",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "project": {
-                        "type": "string",
-                        "description": "Project name",
-                    },
-                    "stage": {
-                        "type": "string",
-                        "description": "Stage name",
+                        "description": "Stage name (e.g., 'dev', 'staging', 'prod')",
                     },
                     "region": {
                         "type": "string",
-                        "description": "OCI region name",
-                    },
-                    "cluster_id": {
-                        "type": "string",
-                        "description": "OKE cluster OCID",
+                        "description": "OCI region name (e.g., 'us-phoenix-1', 'us-ashburn-1')",
                     },
                     "config_file": {
                         "type": "string",
-                        "description": "Path to meta.yaml config file",
+                        "description": "Path to meta.yaml config file (default: meta.yaml)",
                         "default": "meta.yaml",
                     },
                 },
-                "required": ["project", "stage", "region", "cluster_id"],
+                "required": ["project", "stage", "region"],
             },
         ),
         Tool(
-            name="get_node_pool_details",
-            description="Get detailed information about a specific node pool including all individual worker nodes and their states.",
+            name="list_compartment_resources",
+            description=(
+                "List all OCI resources in a compartment including compute instances, OKE clusters, and DevOps projects. "
+                "Use when users ask: 'what resources do we have?', 'show me everything in this compartment', "
+                "'what's running in prod?'. Provides a unified view across resource types."
+            ),
             inputSchema={
                 "type": "object",
                 "properties": {
                     "project": {
                         "type": "string",
-                        "description": "Project name",
+                        "description": "Project name (e.g., 'project-alpha', 'project-beta')",
                     },
                     "stage": {
                         "type": "string",
-                        "description": "Stage name",
+                        "description": "Stage name (e.g., 'dev', 'staging', 'prod')",
                     },
                     "region": {
                         "type": "string",
-                        "description": "OCI region name",
-                    },
-                    "node_pool_id": {
-                        "type": "string",
-                        "description": "OKE node pool OCID",
+                        "description": "OCI region name (e.g., 'us-phoenix-1', 'us-ashburn-1')",
                     },
                     "config_file": {
                         "type": "string",
-                        "description": "Path to meta.yaml config file",
+                        "description": "Path to meta.yaml config file (default: meta.yaml)",
                         "default": "meta.yaml",
                     },
                 },
-                "required": ["project", "stage", "region", "node_pool_id"],
+                "required": ["project", "stage", "region"],
             },
         ),
         Tool(
-            name="check_node_image_updates",
-            description="Check which nodes in a cluster or compartment have newer OS images available. Compares current node images against the latest available images of the same type.",
+            name="get_compute_instances",
+            description=(
+                "List all compute instances (VMs) in a compartment with their states, shapes, and IPs. "
+                "Use when users ask: 'what VMs are running?', 'show me compute instances', 'list servers'. "
+                "Includes both standalone instances and OKE worker nodes."
+            ),
             inputSchema={
                 "type": "object",
                 "properties": {
                     "project": {
                         "type": "string",
-                        "description": "Project name",
+                        "description": "Project name (e.g., 'project-alpha', 'project-beta')",
                     },
                     "stage": {
                         "type": "string",
-                        "description": "Stage name",
+                        "description": "Stage name (e.g., 'dev', 'staging', 'prod')",
                     },
                     "region": {
                         "type": "string",
-                        "description": "OCI region name",
+                        "description": "OCI region name (e.g., 'us-phoenix-1', 'us-ashburn-1')",
                     },
-                    "cluster_id": {
+                    "lifecycle_state": {
                         "type": "string",
-                        "description": "OKE cluster OCID (optional - if not provided, checks all instances in compartment)",
+                        "description": "Filter by lifecycle state (RUNNING, STOPPED, TERMINATED, etc.)",
                     },
                     "config_file": {
                         "type": "string",
-                        "description": "Path to meta.yaml config file",
+                        "description": "Path to meta.yaml config file (default: meta.yaml)",
                         "default": "meta.yaml",
                     },
                 },
@@ -493,7 +667,11 @@ async def list_tools() -> List[Tool]:
         # ========== DevOps Tools ==========
         Tool(
             name="list_devops_projects",
-            description="List all DevOps projects in a compartment. Returns project names, IDs, descriptions, and lifecycle states.",
+            description=(
+                "List all OCI DevOps projects in a compartment with names, IDs, and lifecycle states. "
+                "Use when users ask: 'what DevOps projects exist?', 'show me CI/CD projects'. "
+                "First step before listing pipelines or checking deployments."
+            ),
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -520,7 +698,11 @@ async def list_tools() -> List[Tool]:
         ),
         Tool(
             name="list_deployment_pipelines",
-            description="List all deployment pipelines in a DevOps project or compartment. Returns pipeline names, IDs, and lifecycle states.",
+            description=(
+                "List all deployment pipelines in a DevOps project or compartment. "
+                "Use when users ask: 'what pipelines do we have?', 'show me deployment pipelines'. "
+                "Returns pipeline names, IDs, and lifecycle states."
+            ),
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -551,7 +733,11 @@ async def list_tools() -> List[Tool]:
         ),
         Tool(
             name="get_recent_deployment",
-            description="Get the most recent deployment for a deployment pipeline. Returns deployment status (SUCCEEDED/FAILED/IN_PROGRESS), start time, finish time, and execution details including any errors.",
+            description=(
+                "Get the most recent deployment(s) for a pipeline with status, timing, and error details. "
+                "Use when users ask: 'did my deployment succeed?', 'what's the deployment status?', "
+                "'when did the last deployment run?'. Returns SUCCEEDED/FAILED/IN_PROGRESS status."
+            ),
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -587,7 +773,11 @@ async def list_tools() -> List[Tool]:
         ),
         Tool(
             name="get_deployment_logs",
-            description="Get detailed logs and error information for a specific deployment. Shows stage-by-stage execution details and highlights any failures with error messages.",
+            description=(
+                "Get detailed stage-by-stage execution logs for a deployment including error messages. "
+                "Use when users ask: 'why did the deployment fail?', 'show me deployment logs', "
+                "'what went wrong?'. Highlights failed stages with specific error details."
+            ),
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -623,27 +813,39 @@ async def list_tools() -> List[Tool]:
 async def call_tool(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
     """Handle tool calls."""
     try:
-        if name == "list_oke_clusters":
+        # OKE Status & Discovery Tools
+        if name == "get_oke_status_summary":
+            return await _get_oke_status_summary(arguments)
+        elif name == "list_oke_clusters":
             return await _list_oke_clusters(arguments)
         elif name == "get_oke_cluster_details":
             return await _get_oke_cluster_details(arguments)
-        elif name == "upgrade_oke_cluster":
-            return await _upgrade_oke_cluster(arguments)
+        elif name == "get_oke_version_report":
+            return await _get_oke_version_report(arguments)
+        elif name == "check_node_image_updates":
+            return await _check_node_image_updates(arguments)
+        # OKE Node Pool Tools
         elif name == "list_node_pools":
             return await _list_node_pools(arguments)
+        elif name == "get_node_pool_details":
+            return await _get_node_pool_details(arguments)
+        elif name == "list_cluster_nodes":
+            return await _list_cluster_nodes(arguments)
+        # OKE Mutating Operations
+        elif name == "upgrade_oke_cluster":
+            return await _upgrade_oke_cluster(arguments)
         elif name == "upgrade_node_pool":
             return await _upgrade_node_pool(arguments)
         elif name == "cycle_node_pool":
             return await _cycle_node_pool(arguments)
-        elif name == "get_oke_version_report":
-            return await _get_oke_version_report(arguments)
-        elif name == "list_cluster_nodes":
-            return await _list_cluster_nodes(arguments)
-        elif name == "get_node_pool_details":
-            return await _get_node_pool_details(arguments)
-        elif name == "check_node_image_updates":
-            return await _check_node_image_updates(arguments)
-        # DevOps tools
+        # General OCI Infrastructure Tools
+        elif name == "get_oci_health_check":
+            return await _get_oci_health_check(arguments)
+        elif name == "list_compartment_resources":
+            return await _list_compartment_resources(arguments)
+        elif name == "get_compute_instances":
+            return await _get_compute_instances(arguments)
+        # DevOps Tools
         elif name == "list_devops_projects":
             return await _list_devops_projects(arguments)
         elif name == "list_deployment_pipelines":
@@ -1627,6 +1829,380 @@ async def _get_deployment_logs(arguments: Dict[str, Any]) -> List[TextContent]:
 
     except Exception as e:
         return [TextContent(type="text", text=f"Error getting deployment logs: {str(e)}")]
+
+
+# ========== New Summary and Infrastructure Tools ==========
+
+
+async def _get_oke_status_summary(arguments: Dict[str, Any]) -> List[TextContent]:
+    """Get comprehensive OKE status including clusters, versions, and image updates."""
+    project = arguments["project"]
+    stage = arguments["stage"]
+    region = arguments["region"]
+    config_file = arguments.get("config_file", "meta.yaml")
+
+    client, error = _get_client(project, stage, region, config_file)
+    if error:
+        return [TextContent(type="text", text=f"Error: {error}")]
+
+    compartment_id = _get_compartment_id(project, stage, region, config_file)
+    if not compartment_id:
+        return [
+            TextContent(
+                type="text",
+                text=f"Error: Could not find compartment ID for {project}/{stage}/{region}",
+            )
+        ]
+
+    try:
+        # Get all clusters
+        clusters = client.list_oke_clusters(compartment_id)
+
+        # Build summary for each cluster
+        cluster_summaries = []
+        total_nodes = 0
+        clusters_with_upgrades = 0
+        nodes_needing_updates = 0
+
+        for cluster in clusters:
+            cluster_summary = {
+                "name": cluster.name,
+                "cluster_id": cluster.cluster_id,
+                "kubernetes_version": cluster.kubernetes_version,
+                "lifecycle_state": cluster.lifecycle_state,
+                "available_upgrades": cluster.available_upgrades,
+                "has_upgrades": len(cluster.available_upgrades) > 0,
+            }
+
+            if cluster.available_upgrades:
+                clusters_with_upgrades += 1
+
+            # Get node pools for this cluster
+            try:
+                node_pools = client.list_node_pools(cluster.cluster_id)
+                pool_summaries = []
+                for pool in node_pools:
+                    pool_summary = {
+                        "name": pool.name,
+                        "node_pool_id": pool.node_pool_id,
+                        "kubernetes_version": pool.kubernetes_version,
+                        "node_count": pool.node_count,
+                        "lifecycle_state": pool.lifecycle_state,
+                    }
+                    pool_summaries.append(pool_summary)
+                    total_nodes += pool.node_count or 0
+
+                cluster_summary["node_pools"] = pool_summaries
+                cluster_summary["node_pool_count"] = len(node_pools)
+            except Exception as e:
+                cluster_summary["node_pools_error"] = str(e)
+
+            cluster_summaries.append(cluster_summary)
+
+        # Check for image updates if we have clusters
+        image_update_info = None
+        if clusters:
+            try:
+                instances = client.list_oke_instances(compartment_id)
+                # Count nodes that might need updates (simplified check)
+                nodes_needing_updates = len([i for i in instances if i.lifecycle_state == "RUNNING"])
+                image_update_info = {
+                    "total_oke_instances": len(instances),
+                    "running_instances": nodes_needing_updates,
+                    "note": "Use check_node_image_updates for detailed image version comparison",
+                }
+            except Exception:
+                image_update_info = {"error": "Could not check image updates"}
+
+        # Build recommendations
+        recommendations = []
+        if clusters_with_upgrades > 0:
+            recommendations.append(
+                f"{clusters_with_upgrades} cluster(s) have Kubernetes upgrades available"
+            )
+        if not clusters:
+            recommendations.append("No OKE clusters found in this compartment")
+
+        result = {
+            "project": project,
+            "stage": stage,
+            "region": region,
+            "compartment_id": compartment_id,
+            "summary": {
+                "total_clusters": len(clusters),
+                "clusters_with_upgrades": clusters_with_upgrades,
+                "total_node_pools": sum(
+                    len(c.get("node_pools", [])) for c in cluster_summaries
+                ),
+                "total_nodes": total_nodes,
+            },
+            "clusters": cluster_summaries,
+            "image_updates": image_update_info,
+            "recommendations": recommendations,
+        }
+        return [TextContent(type="text", text=json.dumps(result, indent=2))]
+
+    except Exception as e:
+        return [TextContent(type="text", text=f"Error getting OKE status summary: {str(e)}")]
+
+
+async def _get_oci_health_check(arguments: Dict[str, Any]) -> List[TextContent]:
+    """Get cross-service health summary of OCI infrastructure."""
+    project = arguments["project"]
+    stage = arguments["stage"]
+    region = arguments["region"]
+    config_file = arguments.get("config_file", "meta.yaml")
+
+    client, error = _get_client(project, stage, region, config_file)
+    if error:
+        return [TextContent(type="text", text=f"Error: {error}")]
+
+    compartment_id = _get_compartment_id(project, stage, region, config_file)
+    if not compartment_id:
+        return [
+            TextContent(
+                type="text",
+                text=f"Error: Could not find compartment ID for {project}/{stage}/{region}",
+            )
+        ]
+
+    health_report = {
+        "project": project,
+        "stage": stage,
+        "region": region,
+        "compartment_id": compartment_id,
+        "services": {},
+        "issues": [],
+        "overall_status": "HEALTHY",
+    }
+
+    try:
+        # Check OKE clusters
+        try:
+            clusters = client.list_oke_clusters(compartment_id)
+            unhealthy_clusters = [c for c in clusters if c.lifecycle_state != "ACTIVE"]
+            health_report["services"]["oke"] = {
+                "status": "HEALTHY" if not unhealthy_clusters else "DEGRADED",
+                "total_clusters": len(clusters),
+                "active_clusters": len(clusters) - len(unhealthy_clusters),
+                "unhealthy_clusters": [
+                    {"name": c.name, "state": c.lifecycle_state} for c in unhealthy_clusters
+                ],
+            }
+            if unhealthy_clusters:
+                health_report["issues"].append(
+                    f"OKE: {len(unhealthy_clusters)} cluster(s) not in ACTIVE state"
+                )
+                health_report["overall_status"] = "DEGRADED"
+        except Exception as e:
+            health_report["services"]["oke"] = {"status": "ERROR", "error": str(e)}
+            health_report["issues"].append(f"OKE: Failed to check - {str(e)}")
+
+        # Check Compute instances
+        try:
+            instances = client.list_instances(compartment_id)
+            running = [i for i in instances if i.lifecycle_state == "RUNNING"]
+            stopped = [i for i in instances if i.lifecycle_state == "STOPPED"]
+            other = [i for i in instances if i.lifecycle_state not in ["RUNNING", "STOPPED", "TERMINATED"]]
+            health_report["services"]["compute"] = {
+                "status": "HEALTHY" if not other else "WARNING",
+                "total_instances": len(instances),
+                "running": len(running),
+                "stopped": len(stopped),
+                "other_states": len(other),
+            }
+            if other:
+                health_report["issues"].append(
+                    f"Compute: {len(other)} instance(s) in transitional states"
+                )
+        except Exception as e:
+            health_report["services"]["compute"] = {"status": "ERROR", "error": str(e)}
+
+        # Check DevOps projects
+        try:
+            devops_projects = client.list_devops_projects(compartment_id)
+            active_projects = [p for p in devops_projects if p.lifecycle_state == "ACTIVE"]
+            health_report["services"]["devops"] = {
+                "status": "HEALTHY",
+                "total_projects": len(devops_projects),
+                "active_projects": len(active_projects),
+            }
+        except Exception as e:
+            health_report["services"]["devops"] = {"status": "ERROR", "error": str(e)}
+
+        # Determine overall status
+        if any(s.get("status") == "ERROR" for s in health_report["services"].values()):
+            health_report["overall_status"] = "ERROR"
+        elif any(s.get("status") == "DEGRADED" for s in health_report["services"].values()):
+            health_report["overall_status"] = "DEGRADED"
+        elif any(s.get("status") == "WARNING" for s in health_report["services"].values()):
+            health_report["overall_status"] = "WARNING"
+
+        return [TextContent(type="text", text=json.dumps(health_report, indent=2))]
+
+    except Exception as e:
+        return [TextContent(type="text", text=f"Error performing health check: {str(e)}")]
+
+
+async def _list_compartment_resources(arguments: Dict[str, Any]) -> List[TextContent]:
+    """List all OCI resources in a compartment."""
+    project = arguments["project"]
+    stage = arguments["stage"]
+    region = arguments["region"]
+    config_file = arguments.get("config_file", "meta.yaml")
+
+    client, error = _get_client(project, stage, region, config_file)
+    if error:
+        return [TextContent(type="text", text=f"Error: {error}")]
+
+    compartment_id = _get_compartment_id(project, stage, region, config_file)
+    if not compartment_id:
+        return [
+            TextContent(
+                type="text",
+                text=f"Error: Could not find compartment ID for {project}/{stage}/{region}",
+            )
+        ]
+
+    resources = {
+        "project": project,
+        "stage": stage,
+        "region": region,
+        "compartment_id": compartment_id,
+        "resource_counts": {},
+        "resources": {},
+    }
+
+    try:
+        # List OKE clusters
+        try:
+            clusters = client.list_oke_clusters(compartment_id)
+            resources["resource_counts"]["oke_clusters"] = len(clusters)
+            resources["resources"]["oke_clusters"] = [
+                {
+                    "name": c.name,
+                    "id": c.cluster_id,
+                    "kubernetes_version": c.kubernetes_version,
+                    "state": c.lifecycle_state,
+                }
+                for c in clusters
+            ]
+        except Exception as e:
+            resources["resources"]["oke_clusters_error"] = str(e)
+
+        # List Compute instances
+        try:
+            instances = client.list_instances(compartment_id)
+            resources["resource_counts"]["compute_instances"] = len(instances)
+            resources["resources"]["compute_instances"] = [
+                {
+                    "name": i.display_name,
+                    "id": i.instance_id,
+                    "shape": i.shape,
+                    "state": i.lifecycle_state,
+                    "private_ip": i.private_ip,
+                }
+                for i in instances
+            ]
+        except Exception as e:
+            resources["resources"]["compute_instances_error"] = str(e)
+
+        # List DevOps projects
+        try:
+            devops = client.list_devops_projects(compartment_id)
+            resources["resource_counts"]["devops_projects"] = len(devops)
+            resources["resources"]["devops_projects"] = [
+                {
+                    "name": p.name,
+                    "id": p.project_id,
+                    "state": p.lifecycle_state,
+                }
+                for p in devops
+            ]
+        except Exception as e:
+            resources["resources"]["devops_projects_error"] = str(e)
+
+        # Summary
+        resources["total_resources"] = sum(resources["resource_counts"].values())
+
+        return [TextContent(type="text", text=json.dumps(resources, indent=2))]
+
+    except Exception as e:
+        return [TextContent(type="text", text=f"Error listing compartment resources: {str(e)}")]
+
+
+async def _get_compute_instances(arguments: Dict[str, Any]) -> List[TextContent]:
+    """List all compute instances in a compartment."""
+    project = arguments["project"]
+    stage = arguments["stage"]
+    region = arguments["region"]
+    lifecycle_state = arguments.get("lifecycle_state")
+    config_file = arguments.get("config_file", "meta.yaml")
+
+    client, error = _get_client(project, stage, region, config_file)
+    if error:
+        return [TextContent(type="text", text=f"Error: {error}")]
+
+    compartment_id = _get_compartment_id(project, stage, region, config_file)
+    if not compartment_id:
+        return [
+            TextContent(
+                type="text",
+                text=f"Error: Could not find compartment ID for {project}/{stage}/{region}",
+            )
+        ]
+
+    try:
+        # Import LifecycleState if filtering
+        from oci_client.client import LifecycleState
+
+        filter_state = None
+        if lifecycle_state:
+            try:
+                filter_state = LifecycleState(lifecycle_state)
+            except ValueError:
+                return [
+                    TextContent(
+                        type="text",
+                        text=f"Error: Invalid lifecycle_state '{lifecycle_state}'. Valid values: RUNNING, STOPPED, TERMINATED, etc.",
+                    )
+                ]
+
+        instances = client.list_instances(compartment_id, lifecycle_state=filter_state)
+
+        # Group by state
+        by_state: Dict[str, List[Dict[str, Any]]] = {}
+        for instance in instances:
+            state = instance.lifecycle_state or "UNKNOWN"
+            if state not in by_state:
+                by_state[state] = []
+            by_state[state].append(
+                {
+                    "name": instance.display_name,
+                    "instance_id": instance.instance_id,
+                    "shape": instance.shape,
+                    "private_ip": instance.private_ip,
+                    "availability_domain": instance.availability_domain,
+                    "is_oke_node": "oke-" in (instance.display_name or "").lower(),
+                }
+            )
+
+        result = {
+            "project": project,
+            "stage": stage,
+            "region": region,
+            "compartment_id": compartment_id,
+            "filter": {"lifecycle_state": lifecycle_state} if lifecycle_state else None,
+            "summary": {
+                "total_instances": len(instances),
+                "by_state": {state: len(insts) for state, insts in by_state.items()},
+            },
+            "instances_by_state": by_state,
+        }
+        return [TextContent(type="text", text=json.dumps(result, indent=2))]
+
+    except Exception as e:
+        return [TextContent(type="text", text=f"Error listing compute instances: {str(e)}")]
 
 
 async def main() -> None:
