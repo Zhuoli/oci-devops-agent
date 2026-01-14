@@ -60,20 +60,22 @@ def create_profile_for_region(
 def check_session_token_validity(
     profile_name: str,
     expected_region: Optional[str] = None,
-    expected_tenancy_ocid: Optional[str] = None,
     config_file_path: Optional[str] = None,
 ) -> bool:
     """
     Check if a session token for the given profile is still valid.
 
+    Note: Tenancy validation is skipped because bmc_operator_access is a super-tenancy
+    that can access all other tenancies, so the tenancy OCID in the profile won't match
+    the target tenancy OCID in meta.yaml.
+
     Args:
         profile_name: Name of the OCI profile to check
         expected_region: Expected region the token should be for (validates region match)
-        expected_tenancy_ocid: Expected tenancy OCID (validates tenancy match)
         config_file_path: Optional path to OCI config file
 
     Returns:
-        bool: True if session token exists, is valid, and matches expected region/tenancy
+        bool: True if session token exists, is valid, and matches expected region
     """
     if not oci:
         return False
@@ -117,15 +119,8 @@ def check_session_token_validity(
                 )
                 return False
 
-        # Validate tenancy matches if expected_tenancy_ocid is provided
-        if expected_tenancy_ocid:
-            profile_tenancy = config.get("tenancy", "")
-            if profile_tenancy != expected_tenancy_ocid:
-                logger.warning(
-                    f"Tenancy mismatch for profile {profile_name}: "
-                    f"expected {expected_tenancy_ocid}, got {profile_tenancy}"
-                )
-                return False
+        # Note: Tenancy validation is skipped - bmc_operator_access is a super-tenancy
+        # that can access all other tenancies, so tenancy OCID won't match meta.yaml
 
         # Try to use the config to make a simple API call to verify it works
         try:
@@ -204,8 +199,9 @@ def setup_session_token(
     Returns:
         str: Profile name to use (either the existing/created profile or fallback to DEFAULT)
     """
-    # Load tenancy info from meta.yaml to get realm and tenancy_ocid
-    tenancy_ocid, _tenancy_name, realm = get_tenancy_info_for_region_safe(
+    # Load tenancy info from meta.yaml to get realm (tenancy_ocid not validated since
+    # bmc_operator_access is a super-tenancy that can access all other tenancies)
+    _tenancy_ocid, _tenancy_name, realm = get_tenancy_info_for_region_safe(
         config_file, project_name, stage, region
     )
 
@@ -222,10 +218,10 @@ def setup_session_token(
     # Use file locking to prevent race conditions
     with oci_config_lock():
         # Check if we already have a valid session token for this profile
+        # Note: Only region is validated, not tenancy (bmc_operator_access is cross-tenancy)
         if check_session_token_validity(
             target_profile,
             expected_region=region,
-            expected_tenancy_ocid=tenancy_ocid,
         ):
             token_info = get_session_token_info(target_profile)
             if token_info:
