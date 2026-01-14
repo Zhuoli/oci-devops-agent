@@ -282,22 +282,37 @@ def setup_session_token(
     target_profile = create_profile_for_region(project_name, stage, region, realm)
     logger.info(f"[SESSION_SETUP] Target profile name: '{target_profile}'")
 
-    # Use file locking to prevent race conditions
-    logger.info("[SESSION_SETUP] Acquiring config file lock...")
-    with oci_config_lock():
-        logger.info("[SESSION_SETUP] Lock acquired, checking for existing valid session...")
+    # Check if we already have a valid session token for this profile
+    # This check is done WITHOUT the lock since it's read-only and can run in parallel
+    logger.info("[SESSION_SETUP] Checking for existing valid session (no lock needed for read)...")
+    if check_session_token_validity(
+        target_profile,
+        expected_region=region,
+    ):
+        token_info = get_session_token_info(target_profile)
+        if token_info:
+            age_minutes = token_info["age_minutes"]
+            logger.info(
+                f"[SESSION_SETUP] REUSING existing session token "
+                f"(age: {age_minutes:.1f} minutes)"
+            )
+            display_success(
+                f"✓ Using existing valid session token for profile '{target_profile}' "
+                f"(age: {age_minutes:.1f} minutes, realm: {realm})"
+            )
+            return target_profile
 
-        # Check if we already have a valid session token for this profile
-        # Note: Only region is validated, not tenancy (bmc_operator_access is cross-tenancy)
-        if check_session_token_validity(
-            target_profile,
-            expected_region=region,
-        ):
+    # If no valid session exists, we need to create a new one
+    # Use file locking ONLY for token creation to prevent race conditions
+    logger.info("[SESSION_SETUP] No valid session found, acquiring lock for token creation...")
+    with oci_config_lock():
+        # Double-check after acquiring lock (another thread may have created it)
+        if check_session_token_validity(target_profile, expected_region=region):
             token_info = get_session_token_info(target_profile)
             if token_info:
                 age_minutes = token_info["age_minutes"]
                 logger.info(
-                    f"[SESSION_SETUP] REUSING existing session token "
+                    f"[SESSION_SETUP] Token was created by another thread while waiting for lock "
                     f"(age: {age_minutes:.1f} minutes)"
                 )
                 display_success(
@@ -306,12 +321,10 @@ def setup_session_token(
                 )
                 return target_profile
 
-        # If no valid session exists, create a new one
         logger.info(
-            f"[SESSION_SETUP] No valid session found, will CREATE NEW session token"
+            f"[SESSION_SETUP] Creating NEW session token for realm '{realm}' in region '{region}'"
         )
         display_session_token_header(target_profile)
-        logger.info(f"[SESSION_SETUP] Creating new session token for realm '{realm}' in region '{region}'")
 
         try:
             # Create session token - always use bmc_operator_access as tenancy-name
