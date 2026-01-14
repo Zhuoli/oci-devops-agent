@@ -1,4 +1,6 @@
+import logging
 import sys
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any, Iterable, List, Optional, Tuple
 
@@ -26,6 +28,14 @@ from oci_client.utils.parallel import (  # type: ignore
 
 # Reuse existing project utilities
 from oci_client.utils.yamler import get_region_compartment_pairs  # type: ignore
+
+# Configure logging to see session token diagnostics
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
+    handlers=[logging.StreamHandler(sys.stderr)],
+)
+logger = logging.getLogger(__name__)
 
 console = Console()
 MISSING = "—"

@@ -21,10 +21,11 @@ import json
 import logging
 import sys
 import traceback
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 # Configure logging to file for debugging
 log_file = Path.cwd() / "mcp_server.log"
@@ -1230,15 +1231,18 @@ async def _get_oke_version_report(arguments: Dict[str, Any]) -> List[TextContent
         },
     }
 
-    for region, compartment_id in region_compartments.items():
+    def process_region(args: Tuple[str, str]) -> Tuple[str, Dict[str, Any]]:
+        """Process a single region and return (region_name, region_data)."""
+        region, compartment_id = args
+        logger.info(f"Processing region {region} for version report...")
+
         client, error = _get_client(project, stage, region, config_file)
         if error:
-            report["regions"][region] = {"error": error}
-            continue
+            return region, {"error": error}
 
         try:
             clusters = client.list_oke_clusters(compartment_id)
-            region_data = {
+            region_data: Dict[str, Any] = {
                 "compartment_id": compartment_id,
                 "cluster_count": len(clusters),
                 "clusters": [],
@@ -1262,16 +1266,32 @@ async def _get_oke_version_report(arguments: Dict[str, Any]) -> List[TextContent
                 }
                 region_data["clusters"].append(cluster_data)
 
-                # Update summary
-                report["summary"]["total_clusters"] += 1
-                report["summary"]["total_node_pools"] += len(node_pools)
-                if cluster.available_upgrades:
-                    report["summary"]["clusters_needing_upgrade"] += 1
-
-            report["regions"][region] = region_data
+            return region, region_data
 
         except Exception as e:
-            report["regions"][region] = {"error": str(e)}
+            return region, {"error": str(e)}
+
+    # Process regions in parallel
+    with ThreadPoolExecutor(max_workers=min(len(region_compartments), 8)) as executor:
+        futures = {
+            executor.submit(process_region, (region, comp_id)): region
+            for region, comp_id in region_compartments.items()
+        }
+        for future in as_completed(futures):
+            try:
+                region, region_data = future.result()
+                report["regions"][region] = region_data
+
+                # Update summary if successful
+                if "error" not in region_data:
+                    for cluster_data in region_data.get("clusters", []):
+                        report["summary"]["total_clusters"] += 1
+                        report["summary"]["total_node_pools"] += len(cluster_data.get("node_pools", []))
+                        if cluster_data.get("available_upgrades"):
+                            report["summary"]["clusters_needing_upgrade"] += 1
+            except Exception as e:
+                region = futures[future]
+                report["regions"][region] = {"error": str(e)}
 
     return [TextContent(type="text", text=json.dumps(report, indent=2))]
 
