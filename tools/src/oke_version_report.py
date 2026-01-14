@@ -22,6 +22,12 @@ from oci_client.utils.display import (
     display_success,
     display_warning,
 )
+from oci_client.utils.parallel import (
+    run_parallel_regions,
+    run_parallel_tasks,
+    DEFAULT_REGION_WORKERS,
+    DEFAULT_CLUSTER_WORKERS,
+)
 from oci_client.utils.session import create_oci_client, setup_session_token
 
 console = Console()
@@ -68,52 +74,54 @@ def parse_arguments() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def collect_cluster_entries(
-    *,
+def _process_region_clusters(
     project_name: str,
     stage: str,
-    config_file: str,
+    region: str,
+    compartment_id: str,
 ) -> List[ClusterReportEntry]:
-    """Collect OKE cluster information for the configured regions."""
-    region_compartments = load_region_compartments(project_name, stage, config_file)
-    display_configuration_info(
-        project_name, stage, config_file, len(region_compartments), region_compartments
-    )
+    """Process a single region and collect cluster entries with parallel node pool fetching."""
+    display_region_header(region)
+
+    profile_name = setup_session_token(project_name, stage, region)
+    client = create_oci_client(region, profile_name)
+    if not client:
+        display_warning(f"Skipping region {region}: failed to initialize OCI client.")
+        return []
+
+    try:
+        clusters = client.list_oke_clusters(compartment_id)
+    except Exception as exc:  # pragma: no cover - defensive user feedback
+        display_warning(
+            f"Unable to list OKE clusters in {region} (compartment {compartment_id}): {exc}"
+        )
+        return []
+
+    if not clusters:
+        display_warning(f"No OKE clusters found in {region}.")
+        return []
+
+    display_success(f"Found {len(clusters)} OKE cluster(s) in {region}.")
+
+    # Fetch node pools for all clusters in parallel
+    def fetch_node_pools(cluster: OKEClusterInfo) -> tuple:
+        try:
+            node_pools = client.list_node_pools(cluster.cluster_id, compartment_id)
+            return (cluster, node_pools, None)
+        except Exception as exc:
+            display_warning(
+                f"Failed to list node pools for cluster {cluster.name} ({cluster.cluster_id}): {exc}"
+            )
+            return (cluster, [], exc)
+
+    # Create tasks for parallel node pool fetching
+    tasks = [lambda c=cluster: fetch_node_pools(c) for cluster in clusters]
+    results = run_parallel_tasks(tasks, max_workers=DEFAULT_CLUSTER_WORKERS)
 
     entries: List[ClusterReportEntry] = []
-
-    for region, compartment_id in region_compartments.items():
-        display_region_header(region)
-
-        profile_name = setup_session_token(project_name, stage, region)
-        client = create_oci_client(region, profile_name)
-        if not client:
-            display_warning(f"Skipping region {region}: failed to initialize OCI client.")
-            continue
-
-        try:
-            clusters = client.list_oke_clusters(compartment_id)
-        except Exception as exc:  # pragma: no cover - defensive user feedback
-            display_warning(
-                f"Unable to list OKE clusters in {region} (compartment {compartment_id}): {exc}"
-            )
-            continue
-
-        if not clusters:
-            display_warning(f"No OKE clusters found in {region}.")
-            continue
-
-        display_success(f"Found {len(clusters)} OKE cluster(s) in {region}.")
-
-        for cluster in clusters:
-            try:
-                node_pools = client.list_node_pools(cluster.cluster_id, compartment_id)
-            except Exception as exc:  # pragma: no cover - defensive user feedback
-                display_warning(
-                    f"Failed to list node pools for cluster {cluster.name} ({cluster.cluster_id}): {exc}"
-                )
-                node_pools = []
-
+    for result in results:
+        if result.success and result.result:
+            cluster, node_pools, _ = result.result
             cluster.node_pools = node_pools
             entries.append(
                 ClusterReportEntry(
@@ -124,6 +132,40 @@ def collect_cluster_entries(
                     cluster=cluster,
                 )
             )
+
+    return entries
+
+
+def collect_cluster_entries(
+    *,
+    project_name: str,
+    stage: str,
+    config_file: str,
+) -> List[ClusterReportEntry]:
+    """Collect OKE cluster information for the configured regions in parallel."""
+    region_compartments = load_region_compartments(project_name, stage, config_file)
+    display_configuration_info(
+        project_name, stage, config_file, len(region_compartments), region_compartments
+    )
+
+    # Create tasks for parallel region processing
+    region_tasks = {
+        region: lambda r=region, c=compartment_id: _process_region_clusters(
+            project_name, stage, r, c
+        )
+        for region, compartment_id in region_compartments.items()
+    }
+
+    console.print(f"[bold]Processing {len(region_tasks)} regions in parallel...[/bold]")
+    results = run_parallel_regions(region_tasks, max_workers=DEFAULT_REGION_WORKERS)
+
+    # Aggregate entries from all regions
+    entries: List[ClusterReportEntry] = []
+    for region, result in results.items():
+        if result.success and result.result:
+            entries.extend(result.result)
+        else:
+            display_warning(f"Failed to process region {region}: {result.error}")
 
     return entries
 

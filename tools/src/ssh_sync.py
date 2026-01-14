@@ -32,6 +32,7 @@ from oci_client.utils.display import (
     display_region_header,
     display_summary,
 )
+from oci_client.utils.parallel import run_parallel_regions, DEFAULT_REGION_WORKERS
 from oci_client.utils.resources import collect_all_resources
 from oci_client.utils.session import create_oci_client, display_connection_info, setup_session_token
 from oci_client.utils.ssh_config_generator import (
@@ -141,33 +142,44 @@ def main() -> int:
         project_name, stage, config_file, len(region_compartments), region_compartments
     )
 
-    # Process each region:compartment pair
+    # Process each region:compartment pair in parallel
     all_oke_instances = []
     all_odo_instances = []
     all_bastions = []
     region_data = []  # For SSH config generation
 
-    for region, compartment_id in region_compartments.items():
-        oke_instances, odo_instances, bastions = process_region(
-            project_name, stage, region, compartment_id
-        )
+    # Create tasks for parallel execution
+    region_tasks = {
+        region: lambda r=region, c=compartment_id: process_region(project_name, stage, r, c)
+        for region, compartment_id in region_compartments.items()
+    }
 
-        # Aggregate results
-        all_oke_instances.extend(oke_instances)
-        all_odo_instances.extend(odo_instances)
-        all_bastions.extend(bastions)
+    # Execute regions in parallel
+    console.print(f"[bold]Processing {len(region_tasks)} regions in parallel...[/bold]")
+    results = run_parallel_regions(region_tasks, max_workers=DEFAULT_REGION_WORKERS)
 
-        # Store region data for SSH config generation
-        if oke_instances or odo_instances:
-            region_data.append(
-                {
-                    "region": region,
-                    "compartment_id": compartment_id,
-                    "oke_instances": oke_instances,
-                    "odo_instances": odo_instances,
-                    "bastions": bastions,
-                }
-            )
+    # Aggregate results from all regions
+    for region, result in results.items():
+        compartment_id = region_compartments[region]
+        if result.success and result.result:
+            oke_instances, odo_instances, bastions = result.result
+            all_oke_instances.extend(oke_instances)
+            all_odo_instances.extend(odo_instances)
+            all_bastions.extend(bastions)
+
+            # Store region data for SSH config generation
+            if oke_instances or odo_instances:
+                region_data.append(
+                    {
+                        "region": region,
+                        "compartment_id": compartment_id,
+                        "oke_instances": oke_instances,
+                        "odo_instances": odo_instances,
+                        "bastions": bastions,
+                    }
+                )
+        else:
+            logger.warning(f"Failed to process region {region}: {result.error}")
 
     # Display final summary
     display_summary(

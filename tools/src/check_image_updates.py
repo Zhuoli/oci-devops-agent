@@ -17,6 +17,12 @@ from rich.console import Console
 from rich.table import Table
 
 from oci_client.utils.session import create_oci_client, setup_session_token  # type: ignore
+from oci_client.utils.parallel import (  # type: ignore
+    run_parallel_regions,
+    run_parallel_map,
+    DEFAULT_REGION_WORKERS,
+    DEFAULT_INSTANCE_WORKERS,
+)
 
 # Reuse existing project utilities
 from oci_client.utils.yamler import get_region_compartment_pairs  # type: ignore
@@ -408,11 +414,22 @@ def main(argv: List[str]) -> int:
         console.print(table)
         return 0
 
+    # Process regions in parallel
+    console.print(f"[bold]Processing {len(region_compartment_list)} regions in parallel...[/bold]")
+
+    region_tasks = {
+        region: lambda r=region, c=compartment_id: _collect_instances_with_images(project, stage, r, c)
+        for region, compartment_id in region_compartment_list
+    }
+
+    results = run_parallel_regions(region_tasks, max_workers=DEFAULT_REGION_WORKERS)
+
     all_rows: List[Tuple[str, str, str, str, str]] = []
-    for region, compartment_id in region_compartment_list:
-        console.print(f"[cyan]Processing region {region} (compartment {compartment_id})...[/cyan]")
-        rows = _collect_instances_with_images(project, stage, region, compartment_id)
-        all_rows.extend(rows)
+    for region, result in results.items():
+        if result.success and result.result:
+            all_rows.extend(result.result)
+        else:
+            console.print(f"[red]Failed to process region {region}: {result.error}[/red]")
 
     # Always print table with ALL instances discovered
     table = Table(title=f"Image Updates for Project '{project}' Stage '{stage}'")

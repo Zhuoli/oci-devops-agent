@@ -23,6 +23,12 @@ from rich.logging import RichHandler
 
 from oci_client.models import OKEClusterInfo, OKENodePoolInfo
 from oci_client.utils.display import display_warning
+from oci_client.utils.parallel import (
+    run_parallel_regions,
+    run_parallel_tasks,
+    DEFAULT_REGION_WORKERS,
+    DEFAULT_CLUSTER_WORKERS,
+)
 from oci_client.utils.session import create_oci_client, setup_session_token
 from oke_upgrade import ReportCluster, _ReportHTMLParser, load_clusters_from_report
 
@@ -233,6 +239,210 @@ def _cycle_node_pool(
     )
 
 
+def _process_node_pool_with_details(
+    entry: ReportCluster,
+    node_pool: OKENodePoolInfo,
+    client: Any,
+    cluster_info: OKEClusterInfo,
+    *,
+    grace_period: str,
+    force_after_grace: bool,
+    dry_run: bool,
+) -> NodeCycleResult:
+    """Fetch node pool details and cycle it. Used for parallel execution."""
+    try:
+        node_pool_details = _fetch_node_pool_details(client, node_pool.node_pool_id)
+    except Exception as exc:  # pragma: no cover - defensive guard
+        message = f"Failed to fetch node pool {node_pool.name} ({node_pool.node_pool_id}) details: {exc}"
+        display_warning(message)
+        return NodeCycleResult(
+            entry=entry,
+            node_pool_id=node_pool.node_pool_id,
+            node_pool_name=node_pool.name,
+            status="FAILED",
+            work_request_id=None,
+            error=str(exc),
+        )
+
+    existing_cycling = getattr(node_pool_details, "node_pool_cycling_details", None)
+    maximum_unavailable = _extract_maximum_unavailable(node_pool_details)
+    maximum_surge_raw = (
+        getattr(existing_cycling, "maximum_surge", None) if existing_cycling else None
+    )
+    maximum_surge: Optional[int] = None
+    if maximum_surge_raw not in (None, ""):
+        try:
+            maximum_surge = int(maximum_surge_raw)
+        except (TypeError, ValueError):
+            logger.debug(
+                "Unable to parse maximum_surge=%r; keeping default (None)",
+                maximum_surge_raw,
+            )
+    nodes = getattr(node_pool_details, "nodes", None) or []
+
+    logger.info(
+        "Node pool %s (%s) maximum_unavailable=%s maximum_surge=%s node_count=%s",
+        node_pool.name,
+        node_pool.node_pool_id,
+        maximum_unavailable,
+        maximum_surge,
+        len(nodes),
+    )
+
+    target_version = cluster_info.kubernetes_version or getattr(
+        node_pool_details, "kubernetes_version", None
+    )
+
+    return _cycle_node_pool(
+        entry,
+        node_pool,
+        client,
+        grace_period=grace_period,
+        force_after_grace=force_after_grace,
+        dry_run=dry_run,
+        maximum_unavailable=maximum_unavailable,
+        maximum_surge=maximum_surge,
+        target_version=target_version,
+    )
+
+
+def _process_entry_node_pools(
+    entry: ReportCluster,
+    client: Any,
+    *,
+    grace_period: str,
+    force_after_grace: bool,
+    dry_run: bool,
+) -> List[NodeCycleResult]:
+    """Process all node pools for a single cluster entry with parallel detail fetching."""
+    results: List[NodeCycleResult] = []
+
+    try:
+        cluster_info = _resolve_cluster_details(client, entry.cluster_ocid)
+    except Exception as exc:  # pragma: no cover - defensive guard
+        message = (
+            f"Failed to resolve cluster details for {entry.cluster_name} "
+            f"({entry.cluster_ocid}) in {entry.region}: {exc}"
+        )
+        display_warning(message)
+        return [
+            NodeCycleResult(
+                entry=entry,
+                node_pool_id="N/A",
+                node_pool_name="N/A",
+                status="FAILED",
+                work_request_id=None,
+                error=str(exc),
+            )
+        ]
+
+    if cluster_info.available_upgrades:
+        display_warning(
+            f"Cluster {entry.cluster_name} ({entry.cluster_ocid}) still lists available control "
+            "plane upgrades. Complete the control plane upgrade and regenerate the report before cycling nodes."
+        )
+
+    try:
+        node_pools = _list_node_pools(client, entry.cluster_ocid, cluster_info.compartment_id)
+    except Exception as exc:  # pragma: no cover - defensive guard
+        message = (
+            f"Failed to list node pools for cluster {entry.cluster_name} "
+            f"({entry.cluster_ocid}): {exc}"
+        )
+        display_warning(message)
+        return [
+            NodeCycleResult(
+                entry=entry,
+                node_pool_id="N/A",
+                node_pool_name="N/A",
+                status="FAILED",
+                work_request_id=None,
+                error=str(exc),
+            )
+        ]
+
+    if not node_pools:
+        return results
+
+    # Fetch node pool details and cycle in parallel
+    def process_pool(pool: OKENodePoolInfo) -> NodeCycleResult:
+        return _process_node_pool_with_details(
+            entry,
+            pool,
+            client,
+            cluster_info,
+            grace_period=grace_period,
+            force_after_grace=force_after_grace,
+            dry_run=dry_run,
+        )
+
+    tasks = [lambda p=pool: process_pool(p) for pool in node_pools]
+    task_results = run_parallel_tasks(tasks, max_workers=DEFAULT_CLUSTER_WORKERS)
+
+    for task_result in task_results:
+        if task_result.success and task_result.result:
+            results.append(task_result.result)
+        elif task_result.error:
+            # Create a failure result for the task that errored
+            results.append(
+                NodeCycleResult(
+                    entry=entry,
+                    node_pool_id="N/A",
+                    node_pool_name="N/A",
+                    status="FAILED",
+                    work_request_id=None,
+                    error=str(task_result.error),
+                )
+            )
+
+    return results
+
+
+def _process_region_entries(
+    entries: List[ReportCluster],
+    *,
+    grace_period: str,
+    force_after_grace: bool,
+    dry_run: bool,
+) -> List[NodeCycleResult]:
+    """Process all entries for a single region (client key)."""
+    if not entries:
+        return []
+
+    # All entries share the same client key
+    first_entry = entries[0]
+    profile_name = setup_session_token(first_entry.project, first_entry.stage, first_entry.region)
+    client = create_oci_client(first_entry.region, profile_name)
+
+    if not client:
+        message = f"Failed to initialize OCI client for {first_entry.project}/{first_entry.stage} in {first_entry.region}."
+        display_warning(message)
+        return [
+            NodeCycleResult(
+                entry=entry,
+                node_pool_id="N/A",
+                node_pool_name="N/A",
+                status="FAILED",
+                work_request_id=None,
+                error=message,
+            )
+            for entry in entries
+        ]
+
+    results: List[NodeCycleResult] = []
+    for entry in entries:
+        entry_results = _process_entry_node_pools(
+            entry,
+            client,
+            grace_period=grace_period,
+            force_after_grace=force_after_grace,
+            dry_run=dry_run,
+        )
+        results.extend(entry_results)
+
+    return results
+
+
 def perform_node_cycles(
     entries: Sequence[ReportCluster],
     *,
@@ -240,138 +450,51 @@ def perform_node_cycles(
     force_after_grace: bool,
     dry_run: bool,
 ) -> List[NodeCycleResult]:
-    results: List[NodeCycleResult] = []
-    clients: Dict[Tuple[str, str, str], Any] = {}
+    """
+    Perform node pool cycling for all entries with parallel region processing.
 
+    Entries are grouped by client key (project, stage, region) and each group
+    is processed in parallel. Within each group, node pool detail fetching is
+    also parallelized for improved performance.
+    """
+    if not entries:
+        return []
+
+    # Group entries by client key (project, stage, region)
+    entries_by_key: Dict[Tuple[str, str, str], List[ReportCluster]] = {}
     for entry in entries:
         client_key = (entry.project, entry.stage, entry.region)
-        if client_key not in clients:
-            profile_name = setup_session_token(entry.project, entry.stage, entry.region)
-            client = create_oci_client(entry.region, profile_name)
-            if not client:
-                message = f"Failed to initialize OCI client for {entry.project}/{entry.stage} in {entry.region}."
-                display_warning(message)
-                results.append(
-                    NodeCycleResult(
-                        entry=entry,
-                        node_pool_id="N/A",
-                        node_pool_name="N/A",
-                        status="FAILED",
-                        work_request_id=None,
-                        error=message,
-                    )
-                )
-                continue
-            clients[client_key] = client
+        if client_key not in entries_by_key:
+            entries_by_key[client_key] = []
+        entries_by_key[client_key].append(entry)
 
-        client = clients[client_key]
-        try:
-            cluster_info = _resolve_cluster_details(client, entry.cluster_ocid)
-        except Exception as exc:  # pragma: no cover - defensive guard
-            message = (
-                f"Failed to resolve cluster details for {entry.cluster_name} "
-                f"({entry.cluster_ocid}) in {entry.region}: {exc}"
-            )
-            display_warning(message)
-            results.append(
-                NodeCycleResult(
-                    entry=entry,
-                    node_pool_id="N/A",
-                    node_pool_name="N/A",
-                    status="FAILED",
-                    work_request_id=None,
-                    error=str(exc),
-                )
-            )
-            continue
+    logger.info(
+        f"Processing {len(entries)} cluster(s) across {len(entries_by_key)} region(s) in parallel"
+    )
 
-        if cluster_info.available_upgrades:
-            display_warning(
-                f"Cluster {entry.cluster_name} ({entry.cluster_ocid}) still lists available control "
-                "plane upgrades. Complete the control plane upgrade and regenerate the report before cycling nodes."
-            )
+    # Create tasks for parallel region processing
+    region_tasks = {
+        f"{key[0]}/{key[1]}/{key[2]}": lambda k=key: _process_region_entries(
+            entries_by_key[k],
+            grace_period=grace_period,
+            force_after_grace=force_after_grace,
+            dry_run=dry_run,
+        )
+        for key in entries_by_key.keys()
+    }
 
-        try:
-            node_pools = _list_node_pools(client, entry.cluster_ocid, cluster_info.compartment_id)
-        except Exception as exc:  # pragma: no cover - defensive guard
-            message = (
-                f"Failed to list node pools for cluster {entry.cluster_name} "
-                f"({entry.cluster_ocid}): {exc}"
-            )
-            display_warning(message)
-            results.append(
-                NodeCycleResult(
-                    entry=entry,
-                    node_pool_id="N/A",
-                    node_pool_name="N/A",
-                    status="FAILED",
-                    work_request_id=None,
-                    error=str(exc),
-                )
-            )
-            continue
+    # Execute regions in parallel
+    region_results = run_parallel_regions(region_tasks, max_workers=DEFAULT_REGION_WORKERS)
 
-        for node_pool in node_pools:
-            try:
-                node_pool_details = _fetch_node_pool_details(client, node_pool.node_pool_id)
-            except Exception as exc:  # pragma: no cover - defensive guard
-                message = f"Failed to fetch node pool {node_pool.name} ({node_pool.node_pool_id}) details: {exc}"
-                display_warning(message)
-                results.append(
-                    NodeCycleResult(
-                        entry=entry,
-                        node_pool_id=node_pool.node_pool_id,
-                        node_pool_name=node_pool.name,
-                        status="FAILED",
-                        work_request_id=None,
-                        error=str(exc),
-                    )
-                )
-                continue
+    # Aggregate results from all regions
+    all_results: List[NodeCycleResult] = []
+    for region_key, result in region_results.items():
+        if result.success and result.result:
+            all_results.extend(result.result)
+        else:
+            logger.warning(f"Failed to process region {region_key}: {result.error}")
 
-            existing_cycling = getattr(node_pool_details, "node_pool_cycling_details", None)
-            maximum_unavailable = _extract_maximum_unavailable(node_pool_details)
-            maximum_surge = (
-                getattr(existing_cycling, "maximum_surge", None) if existing_cycling else None
-            )
-            if maximum_surge not in (None, ""):
-                try:
-                    maximum_surge = int(maximum_surge)
-                except (TypeError, ValueError):
-                    logger.debug(
-                        "Unable to parse maximum_surge=%r; keeping default (None)",
-                        maximum_surge,
-                    )
-                    maximum_surge = None
-            nodes = getattr(node_pool_details, "nodes", None) or []
-
-            logger.info(
-                "Node pool %s (%s) maximum_unavailable=%s maximum_surge=%s node_count=%s",
-                node_pool.name,
-                node_pool.node_pool_id,
-                maximum_unavailable,
-                maximum_surge,
-                len(nodes),
-            )
-
-            target_version = cluster_info.kubernetes_version or getattr(
-                node_pool_details, "kubernetes_version", None
-            )
-
-            result = _cycle_node_pool(
-                entry,
-                node_pool,
-                client,
-                grace_period=grace_period,
-                force_after_grace=force_after_grace,
-                dry_run=dry_run,
-                maximum_unavailable=maximum_unavailable,
-                maximum_surge=maximum_surge,
-                target_version=target_version,
-            )
-            results.append(result)
-
-    return results
+    return all_results
 
 
 def _summarize(results: Iterable[NodeCycleResult]) -> Tuple[int, int, int]:
