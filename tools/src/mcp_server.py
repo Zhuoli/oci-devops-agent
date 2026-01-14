@@ -150,12 +150,18 @@ def _get_client(
         Tuple of (client, error_message). If client is None, error_message describes the issue.
     """
     try:
+        logger.info(f"[MCP_CLIENT] Getting client for project={project}, stage={stage}, region={region}")
         profile_name = setup_session_token(project, stage, region, config_file=config_file)
+        logger.info(f"[MCP_CLIENT] Session token setup complete, profile={profile_name}")
         client = create_oci_client(region, profile_name)
         if not client:
+            logger.error(f"[MCP_CLIENT] Failed to create OCI client for region {region}")
             return None, f"Failed to initialize OCI client for region {region}"
+        logger.info(f"[MCP_CLIENT] OCI client created successfully for region {region}")
         return client, None
     except Exception as e:
+        logger.error(f"[MCP_CLIENT] Error initializing OCI client: {type(e).__name__}: {e}")
+        logger.error(f"[MCP_CLIENT] Stack trace: {traceback.format_exc()}")
         return None, f"Error initializing OCI client: {str(e)}"
 
 

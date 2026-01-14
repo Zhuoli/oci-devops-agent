@@ -169,8 +169,9 @@ def check_session_token_validity(
                 token = f.read().strip()
 
             key_file = config["key_file"]
+            pass_phrase = config.get("pass_phrase")
             logger.info(f"[SESSION_CHECK] Loading private key from: {key_file}")
-            private_key = oci.signer.load_private_key_from_file(key_file)
+            private_key = oci.signer.load_private_key_from_file(key_file, pass_phrase=pass_phrase)
             signer = oci.auth.signers.SecurityTokenSigner(token, private_key)
 
             identity_client = oci.identity.IdentityClient(config, signer=signer)
