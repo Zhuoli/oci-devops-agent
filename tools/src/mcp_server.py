@@ -1516,7 +1516,7 @@ def _check_single_node_image(
     latest_image_cache: Dict[str, Any],
 ) -> Dict[str, Any]:
     """Check a single node for image updates. Used for parallel processing."""
-    from oci.pagination import list_call_get_all_results
+    from oci.pagination import list_call_get_all_results_generator
 
     node_result = {
         "node_id": node_info["node_id"],
@@ -1575,15 +1575,16 @@ def _check_single_node_image(
             if cache_key in latest_image_cache:
                 latest_image = latest_image_cache[cache_key]
             else:
-                images = list_call_get_all_results(
+                # Use lazy generator to avoid fetching all images upfront
+                # This stops fetching pages as soon as we find the LATEST image
+                latest_image = None
+                for img in list_call_get_all_results_generator(
                     compute_client.list_images,
+                    'record',  # yield individual image records
                     compartment_id=image_compartment_id,
                     sort_by="TIMECREATED",
                     sort_order="DESC",
-                ).data
-
-                latest_image = None
-                for img in images:
+                ):
                     img_tags = getattr(img, "defined_tags", {}) or {}
                     img_type = None
                     release = None
