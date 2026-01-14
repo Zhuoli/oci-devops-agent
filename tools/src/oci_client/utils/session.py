@@ -2,8 +2,10 @@
 Session management utilities for OCI authentication.
 """
 
-import os
+import fcntl
+import logging
 import time
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Optional
 
@@ -16,25 +18,62 @@ except ImportError:
 
 from ..client import OCIClient, create_oci_session_token
 from .display import display_error, display_session_token_header, display_success, display_warning
+from .yamler import get_tenancy_info_for_region_safe
 
 console = Console()
+logger = logging.getLogger(__name__)
 
 
-def create_profile_for_region(project_name: str, stage: str, region: str) -> str:
-    """Generate profile name for a specific project, stage, and region."""
-    return f"ssh_sync_{project_name}_{stage}_{region.replace('-', '_')}"
+@contextmanager
+def oci_config_lock():
+    """
+    Context manager for locking OCI config file access.
+
+    This prevents race conditions when multiple parallel requests
+    try to create or validate session tokens simultaneously.
+    """
+    lock_file = Path.home() / ".oci" / ".config.lock"
+    lock_file.parent.mkdir(parents=True, exist_ok=True)
+    lock_file.touch(exist_ok=True)
+
+    with open(lock_file, "w") as f:
+        try:
+            fcntl.flock(f, fcntl.LOCK_EX)
+            yield
+        finally:
+            fcntl.flock(f, fcntl.LOCK_UN)
 
 
-def check_session_token_validity(profile_name: str, config_file_path: Optional[str] = None) -> bool:
+def create_profile_for_region(
+    project_name: str, stage: str, region: str, realm: Optional[str] = None
+) -> str:
+    """
+    Generate profile name for a specific project, stage, realm, and region.
+
+    The profile name includes the realm (oc1, oc17, etc.) to ensure
+    different tenancies (e.g., dev vs prod in same region) get isolated profiles.
+    """
+    realm_part = realm if realm else "default"
+    return f"{project_name}_{stage}_{realm_part}_{region.replace('-', '_')}"
+
+
+def check_session_token_validity(
+    profile_name: str,
+    expected_region: Optional[str] = None,
+    expected_tenancy_ocid: Optional[str] = None,
+    config_file_path: Optional[str] = None,
+) -> bool:
     """
     Check if a session token for the given profile is still valid.
 
     Args:
         profile_name: Name of the OCI profile to check
+        expected_region: Expected region the token should be for (validates region match)
+        expected_tenancy_ocid: Expected tenancy OCID (validates tenancy match)
         config_file_path: Optional path to OCI config file
 
     Returns:
-        bool: True if session token exists and is still valid, False otherwise
+        bool: True if session token exists, is valid, and matches expected region/tenancy
     """
     if not oci:
         return False
@@ -65,7 +104,28 @@ def check_session_token_validity(profile_name: str, config_file_path: Optional[s
         max_age_seconds = 50 * 60  # 50 minutes
 
         if token_age_seconds > max_age_seconds:
+            logger.debug(f"Token for profile {profile_name} is too old ({token_age_seconds}s)")
             return False
+
+        # Validate region matches if expected_region is provided
+        if expected_region:
+            profile_region = config.get("region", "")
+            if profile_region.lower() != expected_region.lower():
+                logger.warning(
+                    f"Region mismatch for profile {profile_name}: "
+                    f"expected {expected_region}, got {profile_region}"
+                )
+                return False
+
+        # Validate tenancy matches if expected_tenancy_ocid is provided
+        if expected_tenancy_ocid:
+            profile_tenancy = config.get("tenancy", "")
+            if profile_tenancy != expected_tenancy_ocid:
+                logger.warning(
+                    f"Tenancy mismatch for profile {profile_name}: "
+                    f"expected {expected_tenancy_ocid}, got {profile_tenancy}"
+                )
+                return False
 
         # Try to use the config to make a simple API call to verify it works
         try:
@@ -73,12 +133,14 @@ def check_session_token_validity(profile_name: str, config_file_path: Optional[s
             # Make a simple API call to verify the token works
             identity_client.get_tenancy(config["tenancy"])
             return True
-        except Exception:
+        except Exception as e:
             # If the API call fails, the token is probably expired or invalid
+            logger.debug(f"Token validation API call failed for {profile_name}: {e}")
             return False
 
-    except Exception:
+    except Exception as e:
         # If any step fails, assume the session token is not valid
+        logger.debug(f"Session token validity check failed for {profile_name}: {e}")
         return False
 
 
@@ -116,51 +178,86 @@ def get_session_token_info(
             "token_file": str(token_file_path),
             "age_minutes": token_age_minutes,
             "region": config.get("region", "unknown"),
+            "tenancy": config.get("tenancy", "unknown"),
         }
 
     except Exception:
         return None
 
 
-def setup_session_token(project_name: str, stage: str, region: str) -> str:
+def setup_session_token(
+    project_name: str, stage: str, region: str, config_file: str = "meta.yaml"
+) -> str:
     """
     Create or reuse session token for a region and return the profile name to use.
-    Optimized to check for existing valid sessions before creating new ones.
+
+    This function is thread-safe and handles concurrent access properly.
+    It loads realm and tenancy information from meta.yaml to ensure proper isolation
+    between different tenancies (e.g., dev vs prod in same region).
+
+    Args:
+        project_name: Project name from meta.yaml
+        stage: Stage name (e.g., 'dev', 'staging', 'prod')
+        region: OCI region name (e.g., 'us-phoenix-1')
+        config_file: Path to meta.yaml config file
 
     Returns:
         str: Profile name to use (either the existing/created profile or fallback to DEFAULT)
     """
-    target_profile = create_profile_for_region(project_name, stage, region)
+    # Load tenancy info from meta.yaml to get realm and tenancy_ocid
+    tenancy_ocid, _tenancy_name, realm = get_tenancy_info_for_region_safe(
+        config_file, project_name, stage, region
+    )
 
-    # Check if we already have a valid session token for this profile
-    if check_session_token_validity(target_profile):
-        token_info = get_session_token_info(target_profile)
-        if token_info:
-            age_minutes = token_info["age_minutes"]
-            display_success(
-                f"✓ Using existing valid session token for profile '{target_profile}' (age: {age_minutes:.1f} minutes)"
+    if not realm:
+        logger.warning(
+            f"No realm found in meta.yaml for {project_name}/{stage}/{region}. "
+            "Using 'default' as realm."
+        )
+        realm = "default"
+
+    # Generate profile name including realm for isolation
+    target_profile = create_profile_for_region(project_name, stage, region, realm)
+
+    # Use file locking to prevent race conditions
+    with oci_config_lock():
+        # Check if we already have a valid session token for this profile
+        if check_session_token_validity(
+            target_profile,
+            expected_region=region,
+            expected_tenancy_ocid=tenancy_ocid,
+        ):
+            token_info = get_session_token_info(target_profile)
+            if token_info:
+                age_minutes = token_info["age_minutes"]
+                display_success(
+                    f"✓ Using existing valid session token for profile '{target_profile}' "
+                    f"(age: {age_minutes:.1f} minutes, realm: {realm})"
+                )
+                return target_profile
+
+        # If no valid session exists, create a new one
+        display_session_token_header(target_profile)
+        logger.info(f"Creating new session token for realm '{realm}' in region '{region}'")
+
+        try:
+            # Create session token - always use bmc_operator_access as tenancy-name
+            token_success = create_oci_session_token(
+                profile_name=target_profile,
+                region_name=region,
+                tenancy_name="bmc_operator_access",
             )
+
+            if not token_success:
+                display_error("Failed to create session token. Using DEFAULT profile...")
+                return "DEFAULT"  # Fall back to DEFAULT profile
+
             return target_profile
 
-    # If no valid session exists, create a new one
-    display_session_token_header(target_profile)
-
-    try:
-        # Create session token using standalone function (no client needed)
-        token_success = create_oci_session_token(
-            profile_name=target_profile, region_name=region, tenancy_name="bmc_operator_access"
-        )
-
-        if not token_success:
-            display_error("Failed to create session token. Using DEFAULT profile...")
-            return "DEFAULT"  # Fall back to DEFAULT profile
-
-        return target_profile
-
-    except Exception as e:
-        display_warning(f"Could not create session token: {e}")
-        display_warning("Falling back to DEFAULT profile...")
-        return "DEFAULT"
+        except Exception as e:
+            display_warning(f"Could not create session token: {e}")
+            display_warning("Falling back to DEFAULT profile...")
+            return "DEFAULT"
 
 
 def create_oci_client(region: str, profile_name: str) -> Optional[OCIClient]:
