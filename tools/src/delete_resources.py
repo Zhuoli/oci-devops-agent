@@ -22,10 +22,7 @@ from oci_client.resource_deletion import (  # noqa: E402
     ResourceDeletionError,
     get_deletion_commands,
 )
-from oci_client.utils.session import (  # noqa: E402
-    create_oci_client,
-    setup_session_token,
-)
+from oci_client.utils.session import create_oci_client, setup_session_token  # noqa: E402
 
 
 def build_parser(commands: Sequence[BaseDeletionCommand]) -> argparse.ArgumentParser:

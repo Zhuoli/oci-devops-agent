@@ -23,9 +23,9 @@ from .models import (
     DevOpsProjectInfo,
     InstanceInfo,
     LifecycleState,
+    OCIConfig,
     OKEClusterInfo,
     OKENodePoolInfo,
-    OCIConfig,
     RegionInfo,
     SessionInfo,
 )
@@ -446,7 +446,9 @@ class OCIClient:
 
         except Exception as e:
             logger.error(f"Failed to list OKE clusters in compartment {compartment_id}: {e}")
-            raise RuntimeError(f"Failed to list OKE clusters in compartment {compartment_id}: {e}") from e
+            raise RuntimeError(
+                f"Failed to list OKE clusters in compartment {compartment_id}: {e}"
+            ) from e
 
     def list_node_pools(
         self,
@@ -1362,7 +1364,9 @@ class OCIClient:
                     deployment_detail = deployment
 
                 # Parse execution progress
-                execution_progress = getattr(deployment_detail, "deployment_execution_progress", None)
+                execution_progress = getattr(
+                    deployment_detail, "deployment_execution_progress", None
+                )
                 execution_progress_dict = None
                 if execution_progress:
                     execution_progress_dict = {
@@ -1496,10 +1500,14 @@ class OCIClient:
                 "lifecycle_details": lifecycle_details,
                 "time_created": str(getattr(deployment, "time_created", None)),
                 "time_started": str(
-                    getattr(execution_progress, "time_started", None) if execution_progress else None
+                    getattr(execution_progress, "time_started", None)
+                    if execution_progress
+                    else None
                 ),
                 "time_finished": str(
-                    getattr(execution_progress, "time_finished", None) if execution_progress else None
+                    getattr(execution_progress, "time_finished", None)
+                    if execution_progress
+                    else None
                 ),
                 "stages": stages_info,
                 "failed_stages": failed_stages,

@@ -1,6 +1,6 @@
 # OCI DevOps Agent Configuration
 # ================================
-# This file defines project/stage/region/realm to compartment_id mappings
+# This file defines project/stage/realm/tenancy/region to compartment_id mappings
 # for OCI operations.
 #
 # Copy this file to meta.yaml and customize with your actual values:
@@ -11,6 +11,8 @@
 #     <project-name>:
 #       <stage>:
 #         <realm>:
+#           tenancy-ocid: <tenancy-ocid>
+#           tenancy-name: <tenancy-name>
 #           <region>:
 #             compartment_id: <ocid>
 #
@@ -23,6 +25,8 @@
 #   Use whatever stages match your deployment pipeline.
 #
 # Realms:
+#   Each realm has exactly one tenancy, and each tenancy can have multiple
+#   compartments across multiple regions.
 #   - oc1: Commercial/public cloud
 #   - oc2: US Government FedRAMP High
 #   - oc3: US Government DISA IL5
@@ -39,6 +43,12 @@
 #   - oc24: Dedicated region
 #   - oc26: Dedicated region
 #
+# Tenancy:
+#   Each realm contains exactly one tenancy. The tenancy-ocid and tenancy-name
+#   fields are required for each realm entry.
+#   - tenancy-ocid: The OCID of the tenancy (e.g., ocid1.tenancy.oc1..xxxxx)
+#   - tenancy-name: A human-readable name for the tenancy
+#
 # Regions:
 #   Use OCI region identifiers (e.g., us-phoenix-1, us-ashburn-1, eu-frankfurt-1)
 
@@ -48,18 +58,24 @@ projects:
   project-alpha:
     dev:
       oc1:
+        tenancy-ocid: ocid1.tenancy.oc1..aaaaaaaexampletenancy1
+        tenancy-name: "example-dev-tenancy"
         us-phoenix-1:
           compartment_id: ocid1.compartment.oc1..aaaaaaaexampledev1
         us-ashburn-1:
           compartment_id: ocid1.compartment.oc1..aaaaaaaexampledev2
     staging:
       oc1:
+        tenancy-ocid: ocid1.tenancy.oc1..aaaaaaaexampletenancy2
+        tenancy-name: "example-staging-tenancy"
         us-phoenix-1:
           compartment_id: ocid1.compartment.oc1..aaaaaaaexamplestaging1
         us-ashburn-1:
           compartment_id: ocid1.compartment.oc1..aaaaaaaexamplestaging2
     prod:
       oc1:
+        tenancy-ocid: ocid1.tenancy.oc1..aaaaaaaexampletenancy3
+        tenancy-name: "example-prod-tenancy"
         us-phoenix-1:
           compartment_id: ocid1.compartment.oc1..aaaaaaaexampleprod1
         us-ashburn-1:
@@ -72,15 +88,21 @@ projects:
   project-beta:
     dev:
       oc1:
+        tenancy-ocid: ocid1.tenancy.oc1..aaaaaaabetatenancy1
+        tenancy-name: "beta-dev-tenancy"
         us-phoenix-1:
           compartment_id: ocid1.compartment.oc1..aaaaaaabetadev1
     staging:
       oc1:
+        tenancy-ocid: ocid1.tenancy.oc1..aaaaaaabetatenancy2
+        tenancy-name: "beta-staging-tenancy"
         us-ashburn-1:
           compartment_id: ocid1.compartment.oc1..aaaaaaabetastaging1
     prod:
       # Example with a dedicated region (realm oc17)
       oc17:
+        tenancy-ocid: ocid1.tenancy.oc17..aaaaaaabetatenancy3
+        tenancy-name: "beta-prod-tenancy"
         us-dcc-phoenix-1:
           compartment_id: ocid1.compartment.oc17..aaaaaaabetaprod1
 
@@ -88,5 +110,7 @@ projects:
   # my-service:
   #   dev:
   #     oc1:
+  #       tenancy-ocid: ocid1.tenancy.oc1..your-tenancy-ocid
+  #       tenancy-name: "your-tenancy-name"
   #       us-phoenix-1:
   #         compartment_id: ocid1.compartment.oc1..your-compartment-id

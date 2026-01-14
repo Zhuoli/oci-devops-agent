@@ -16,7 +16,9 @@ from __future__ import annotations
 import argparse
 import csv
 import getpass
+import json
 import logging
+import re
 import sys
 import time
 import webbrowser
@@ -34,19 +36,21 @@ from oci.container_engine.models import (
     UpdateNodePoolDetails,
 )
 from oci.core import ComputeManagementClient
-import re
 from rich.console import Console
-from rich.table import Table
 from rich.panel import Panel
 from rich.syntax import Syntax
-import json
+from rich.table import Table
 
 try:  # OCI SDK < 2.110.0 does not expose UpdateNodeSourceViaImageDetails
-    from oci.container_engine.models import UpdateNodeSourceViaImageDetails as _UpdateNodeSourceViaImageDetails
+    from oci.container_engine.models import (
+        UpdateNodeSourceViaImageDetails as _UpdateNodeSourceViaImageDetails,
+    )
 except ImportError:  # pragma: no cover - defensive fallback for older SDKs
     _UpdateNodeSourceViaImageDetails = None
     try:
-        from oci.container_engine.models import NodeSourceViaImageDetails as _NodeSourceViaImageDetails
+        from oci.container_engine.models import (
+            NodeSourceViaImageDetails as _NodeSourceViaImageDetails,
+        )
     except ImportError:  # pragma: no cover - very old SDKs fallback to dict payloads
         _NodeSourceViaImageDetails = None
 else:  # pragma: no cover - keep name defined for downstream logic
@@ -54,8 +58,8 @@ else:  # pragma: no cover - keep name defined for downstream logic
 
 UpdateNodeSourceViaImageDetails = _UpdateNodeSourceViaImageDetails  # type: ignore[assignment]
 NodeSourceViaImageDetails = _NodeSourceViaImageDetails  # type: ignore[assignment]
-from oci.pagination import list_call_get_all_results
 import yaml
+from oci.pagination import list_call_get_all_results
 
 from oci_client.client import OCIClient
 from oci_client.utils.session import create_oci_client, setup_session_token
@@ -553,7 +557,9 @@ class NodePoolImageUpdater:
                     (instruction.region, instruction.compartment_id)
                 )
             if not context:
-                contexts = self._compartment_lookup_by_compartment.get(instruction.compartment_id, [])
+                contexts = self._compartment_lookup_by_compartment.get(
+                    instruction.compartment_id, []
+                )
                 if len(contexts) == 1:
                     context = contexts[0]
                 elif contexts:
@@ -588,7 +594,7 @@ class NodePoolImageUpdater:
             if not instance:
                 self.logger.debug(
                     "Instance not found by hostname '%s', checking if it's an instance pool name",
-                    instruction.host_name
+                    instruction.host_name,
                 )
                 instance_pool = self._find_instance_pool_by_name(
                     instruction.host_name, instruction.compartment_id, context
@@ -597,7 +603,7 @@ class NodePoolImageUpdater:
                     self.logger.info(
                         "Found instance pool '%s' (id=%s), getting instances from pool",
                         instance_pool.display_name,
-                        instance_pool.id[-12:]
+                        instance_pool.id[-12:],
                     )
                     # Get any instance from the pool to extract pool ID
                     pool_instances = self._get_instance_pool_instances(
@@ -607,7 +613,7 @@ class NodePoolImageUpdater:
                         instance = pool_instances[0]
                         self.logger.info(
                             "Using instance '%s' from pool to process cycling",
-                            getattr(instance, "display_name", instance.id[-12:])
+                            getattr(instance, "display_name", instance.id[-12:]),
                         )
 
             if not instance:
@@ -719,10 +725,7 @@ class NodePoolImageUpdater:
                     )
                 )
                 return
-            if (
-                action.new_image_name.strip().lower()
-                != instruction.new_image_name.strip().lower()
-            ):
+            if action.new_image_name.strip().lower() != instruction.new_image_name.strip().lower():
                 # Mixing target images inside the same pool is a misconfiguration we cannot recover from.
                 self._errors.append(
                     "Conflicting target images for node pool {node_pool}: {existing} vs {incoming}".format(
@@ -787,10 +790,7 @@ class NodePoolImageUpdater:
                     )
                 )
                 return
-            if (
-                action.new_image_name.strip().lower()
-                != instruction.new_image_name.strip().lower()
-            ):
+            if action.new_image_name.strip().lower() != instruction.new_image_name.strip().lower():
                 self._errors.append(
                     "Conflicting target images for instance pool {pool}: {existing} vs {incoming}".format(
                         pool=instance_pool_id,
@@ -815,7 +815,10 @@ class NodePoolImageUpdater:
 
         self.logger.debug(
             "Looking for instance with host_name='%s' (base='%s') in compartment %s, region %s",
-            host_name, base_host_key, compartment_id, context.region
+            host_name,
+            base_host_key,
+            compartment_id,
+            context.region,
         )
 
         matches: List[oci.core.models.Instance] = []
@@ -829,11 +832,13 @@ class NodePoolImageUpdater:
 
         for instance in instances:
             if instance.lifecycle_state not in ACTIVE_INSTANCE_STATES:
-                inactive_states.append((
-                    getattr(instance, "display_name", "unknown"),
-                    instance.lifecycle_state,
-                    instance.id
-                ))
+                inactive_states.append(
+                    (
+                        getattr(instance, "display_name", "unknown"),
+                        instance.lifecycle_state,
+                        instance.id,
+                    )
+                )
                 continue
 
             active_count += 1
@@ -848,27 +853,29 @@ class NodePoolImageUpdater:
                 display_name,
                 instance.id[-12:],
                 instance.lifecycle_state,
-                instance_names
+                instance_names,
             )
 
             if host_key in instance_names or base_host_key in instance_names:
                 matches.append(instance)
                 self.logger.debug(
                     "✓ MATCH FOUND: Instance '%s' matches search key",
-                    getattr(instance, "display_name", instance.id)
+                    getattr(instance, "display_name", instance.id),
                 )
 
         # Log summary
         self.logger.info(
             "Instance search for '%s': %d active instances checked, %d matches found",
-            host_name, active_count, len(matches)
+            host_name,
+            active_count,
+            len(matches),
         )
 
         if inactive_states:
             self.logger.debug(
                 "Skipped %d inactive instances: %s",
                 len(inactive_states),
-                ", ".join(f"{name}({state})" for name, state, _ in inactive_states[:5])
+                ", ".join(f"{name}({state})" for name, state, _ in inactive_states[:5]),
             )
 
         if not matches:
@@ -876,19 +883,20 @@ class NodePoolImageUpdater:
                 "No matching compute instance for host '%s' in compartment %s (searched %d active instances)",
                 host_name,
                 compartment_id,
-                active_count
+                active_count,
             )
             # Log what we were looking for vs what we found
             if active_count > 0:
                 self.logger.warning(
                     "Search keys were: '%s' or '%s'. Try checking if hostname in CSV matches instance display_name/hostname in OCI.",
-                    host_key, base_host_key
+                    host_key,
+                    base_host_key,
                 )
                 # Show actual instance names found (at INFO level so it's always visible)
                 if all_active_names:
                     self.logger.info(
                         "Active instances found in compartment: %s",
-                        ", ".join(f"'{name}'" for name in all_active_names[:10])
+                        ", ".join(f"'{name}'" for name in all_active_names[:10]),
                     )
             return None
 
@@ -897,7 +905,7 @@ class NodePoolImageUpdater:
                 "Multiple compute instances matched host '%s' in compartment %s; skipping. Matched: %s",
                 host_name,
                 compartment_id,
-                ", ".join(getattr(m, "display_name", m.id) for m in matches)
+                ", ".join(getattr(m, "display_name", m.id) for m in matches),
             )
             return None
 
@@ -1039,22 +1047,16 @@ class NodePoolImageUpdater:
                         "Found instance pool: display_name='%s', id='%s', state='%s'",
                         pool.display_name,
                         pool.id[-12:],
-                        pool.lifecycle_state
+                        pool.lifecycle_state,
                     )
                     return pool
 
             self.logger.debug(
-                "No instance pool found with name '%s' in compartment %s",
-                pool_name,
-                compartment_id
+                "No instance pool found with name '%s' in compartment %s", pool_name, compartment_id
             )
             return None
         except Exception as e:
-            self.logger.warning(
-                "Error searching for instance pool '%s': %s",
-                pool_name,
-                str(e)
-            )
+            self.logger.warning("Error searching for instance pool '%s': %s", pool_name, str(e))
             return None
 
     def _get_instance_pool_instances(
@@ -1072,8 +1074,7 @@ class NodePoolImageUpdater:
         try:
             # Get instance pool instances
             response = compute_mgmt_client.list_instance_pool_instances(
-                compartment_id=compartment_id,
-                instance_pool_id=pool_id
+                compartment_id=compartment_id, instance_pool_id=pool_id
             )
 
             # Extract instance IDs
@@ -1093,23 +1094,15 @@ class NodePoolImageUpdater:
                     if instance.lifecycle_state in ACTIVE_INSTANCE_STATES:
                         instances.append(instance)
                 except Exception as e:
-                    self.logger.warning(
-                        "Error fetching instance %s: %s",
-                        instance_id[-12:],
-                        str(e)
-                    )
+                    self.logger.warning("Error fetching instance %s: %s", instance_id[-12:], str(e))
 
-            self.logger.debug(
-                "Found %d active instances in pool %s",
-                len(instances),
-                pool_id[-12:]
-            )
+            self.logger.debug("Found %d active instances in pool %s", len(instances), pool_id[-12:])
             return instances
         except Exception as e:
             self.logger.warning(
                 "Error getting instances for pool %s: %s",
                 pool_id[-12:] if pool_id else "unknown",
-                str(e)
+                str(e),
             )
             return []
 
@@ -1429,7 +1422,10 @@ class NodePoolImageUpdater:
 
             for image in images:
                 display_name = getattr(image, "display_name", None)
-                if isinstance(display_name, str) and display_name.strip().lower() == normalized_name_ci:
+                if (
+                    isinstance(display_name, str)
+                    and display_name.strip().lower() == normalized_name_ci
+                ):
                     image_id = getattr(image, "id", None)
                     if isinstance(image_id, str):
                         return image_id
@@ -1441,9 +1437,8 @@ class NodePoolImageUpdater:
                 image_type,
             )
             if latest_image:
-                candidate_name = (
-                    getattr(latest_image, "display_name", "")
-                    or getattr(latest_image, "id", "")
+                candidate_name = getattr(latest_image, "display_name", "") or getattr(
+                    latest_image, "id", ""
                 )
                 if candidate_name.strip().lower() == normalized_name_ci:
                     image_id = getattr(latest_image, "id", None)
@@ -1475,11 +1470,9 @@ class NodePoolImageUpdater:
                     if isinstance(image_id, str):
                         return image_id
 
-        message = (
-            "Unable to resolve image ID for identifier '{name}' in compartments {compartments}".format(
-                name=image_identifier,
-                compartments=", ".join(search_compartments) if search_compartments else "(none)",
-            )
+        message = "Unable to resolve image ID for identifier '{name}' in compartments {compartments}".format(
+            name=image_identifier,
+            compartments=", ".join(search_compartments) if search_compartments else "(none)",
         )
         self.logger.error(message)
         self._errors.append(message)
@@ -1554,7 +1547,7 @@ class NodePoolImageUpdater:
         """Recursively convert OCI SDK model objects to dictionaries."""
         if obj is None:
             return None
-        elif hasattr(obj, 'swagger_types'):
+        elif hasattr(obj, "swagger_types"):
             # OCI SDK model object - convert recursively
             result = {}
             for attr in obj.swagger_types.keys():
@@ -1588,11 +1581,13 @@ class NodePoolImageUpdater:
         panel_content += f"[bold cyan]Target Image:[/bold cyan] {target_image_name}\n\n"
         panel_content += "[bold yellow]Update Details (JSON):[/bold yellow]\n"
 
-        self.console.print(Panel(
-            panel_content,
-            title="[bold magenta]API Request Details[/bold magenta]",
-            border_style="cyan"
-        ))
+        self.console.print(
+            Panel(
+                panel_content,
+                title="[bold magenta]API Request Details[/bold magenta]",
+                border_style="cyan",
+            )
+        )
 
         # Print JSON with syntax highlighting
         syntax = Syntax(details_json, "json", theme="monokai", line_numbers=True)
@@ -1647,7 +1642,7 @@ class NodePoolImageUpdater:
     def _execute(
         self,
         node_pool_plans: Iterable[NodePoolUpdateAction],
-        instance_pool_plans: Iterable[InstancePoolUpdateAction]
+        instance_pool_plans: Iterable[InstancePoolUpdateAction],
     ) -> None:
         """Execute the planned image upgrades and recycling operations for both pool types."""
 
@@ -1769,7 +1764,7 @@ class NodePoolImageUpdater:
             self.logger.info(
                 "Processing instance pool %s with %d instance(s)",
                 action.instance_pool_id,
-                len(action.instances)
+                len(action.instances),
             )
 
             summary_compartment = action.instances[0].compartment_id if action.instances else None
@@ -1875,42 +1870,44 @@ class NodePoolImageUpdater:
 
             # Resolve target image ID - extract current image from instance configuration
             current_image_id = None
-            if hasattr(current_config, 'instance_details'):
+            if hasattr(current_config, "instance_details"):
                 instance_details = current_config.instance_details
                 # Try different paths where image_id might be stored
-                if hasattr(instance_details, 'launch_details'):
+                if hasattr(instance_details, "launch_details"):
                     launch_details = instance_details.launch_details
-                    current_image_id = getattr(launch_details, 'image_id', None)
-                elif hasattr(instance_details, 'source_details'):
+                    current_image_id = getattr(launch_details, "image_id", None)
+                elif hasattr(instance_details, "source_details"):
                     source_details = instance_details.source_details
-                    current_image_id = getattr(source_details, 'image_id', None)
+                    current_image_id = getattr(source_details, "image_id", None)
 
             # Log what we found
             if current_image_id:
                 self.logger.debug(
                     "Extracted current image ID from instance config: %s",
-                    current_image_id[-12:] if current_image_id else "None"
+                    current_image_id[-12:] if current_image_id else "None",
                 )
             else:
                 self.logger.warning(
                     "Could not extract current image ID from instance configuration %s",
-                    current_config_id[-12:]
+                    current_config_id[-12:],
                 )
                 # Try to get image ID from one of the actual instances
                 if instances:
                     client = self._get_client(context)
                     if client:
                         try:
-                            inst_response = client.compute_client.get_instance(instances[0].instance_id)
+                            inst_response = client.compute_client.get_instance(
+                                instances[0].instance_id
+                            )
                             instance = inst_response.data
-                            source_details = getattr(instance, 'source_details', None)
+                            source_details = getattr(instance, "source_details", None)
                             if source_details:
-                                current_image_id = getattr(source_details, 'image_id', None)
+                                current_image_id = getattr(source_details, "image_id", None)
                                 if current_image_id:
                                     self.logger.info(
                                         "Extracted current image ID from instance %s: %s",
                                         instances[0].instance_id[-12:],
-                                        current_image_id[-12:]
+                                        current_image_id[-12:],
                                     )
                         except Exception as e:
                             self.logger.debug("Could not get image from instance: %s", str(e))
@@ -1960,8 +1957,7 @@ class NodePoolImageUpdater:
                 if i >= max_surge:
                     # Wait for replacements before detaching more
                     self.logger.info(
-                        "Detached %d instances, waiting for pool to create replacements...",
-                        i
+                        "Detached %d instances, waiting for pool to create replacements...", i
                     )
                     time.sleep(30)  # Give pool time to create new instances
 
@@ -1997,16 +1993,18 @@ class NodePoolImageUpdater:
 
         try:
             # Build new configuration based on current one
-            from oci.core.models import CreateInstanceConfigurationDetails, ComputeInstanceDetails
+            from oci.core.models import ComputeInstanceDetails, CreateInstanceConfigurationDetails
 
             # Clone the instance details and update the image
             instance_details = current_config.instance_details
-            if hasattr(instance_details, 'launch_details'):
+            if hasattr(instance_details, "launch_details"):
                 launch_details = instance_details.launch_details
                 # Update image ID
                 launch_details.image_id = new_image_id
 
-            new_config_name = f"{current_config.display_name or 'config'}-{new_image_name}-{int(time.time())}"
+            new_config_name = (
+                f"{current_config.display_name or 'config'}-{new_image_name}-{int(time.time())}"
+            )
 
             create_details = CreateInstanceConfigurationDetails(
                 compartment_id=current_config.compartment_id,
@@ -2023,9 +2021,7 @@ class NodePoolImageUpdater:
             summary.config_created_at = datetime.now(timezone.utc)
 
             self.logger.info(
-                "Created new instance configuration %s with image %s",
-                new_config_id,
-                new_image_name
+                "Created new instance configuration %s with image %s", new_config_id, new_image_name
             )
             return new_config_id
 
@@ -2052,14 +2048,10 @@ class NodePoolImageUpdater:
         try:
             from oci.core.models import UpdateInstancePoolDetails
 
-            update_details = UpdateInstancePoolDetails(
-                instance_configuration_id=new_config_id
-            )
+            update_details = UpdateInstancePoolDetails(instance_configuration_id=new_config_id)
 
             self.logger.info(
-                "Updating instance pool %s to use configuration %s",
-                instance_pool_id,
-                new_config_id
+                "Updating instance pool %s to use configuration %s", instance_pool_id, new_config_id
             )
 
             response = cm_client.update_instance_pool(instance_pool_id, update_details)
@@ -2099,7 +2091,7 @@ class NodePoolImageUpdater:
                 "Detaching instance %s (%s) from pool %s",
                 instance_plan.host_name,
                 instance_plan.instance_id,
-                instance_pool_id
+                instance_pool_id,
             )
 
             detach_details = DetachInstancePoolInstanceDetails(
@@ -2110,7 +2102,7 @@ class NodePoolImageUpdater:
 
             response = cm_client.detach_instance_pool_instance(
                 instance_pool_id=instance_pool_id,
-                detach_instance_pool_instance_details=detach_details
+                detach_instance_pool_instance_details=detach_details,
             )
 
             return WorkRequestResult(
@@ -2120,9 +2112,7 @@ class NodePoolImageUpdater:
 
         except oci_exceptions.ServiceError as exc:
             self.logger.error(
-                "Failed to detach instance %s: %s",
-                instance_plan.host_name,
-                exc.message
+                "Failed to detach instance %s: %s", instance_plan.host_name, exc.message
             )
             return WorkRequestResult(
                 description=f"Detach instance {instance_plan.host_name}",
@@ -2176,7 +2166,7 @@ class NodePoolImageUpdater:
             f"[bold yellow]>>> Executing API Call:[/bold yellow] "
             f"[bold white]ce_client.update_node_pool[/bold white]"
             f"([cyan]{node_pool_id}[/cyan], details)",
-            style="on blue"
+            style="on blue",
         )
         self.console.print("\n")
 
@@ -2185,9 +2175,7 @@ class NodePoolImageUpdater:
         except oci_exceptions.ServiceError as exc:
             self.logger.error("Failed to update node pool %s: %s", node_pool_id, exc.message)
             self._errors.append(f"Failed to update node pool {node_pool_id}: {exc.message}")
-            self.console.print(
-                f"[bold red]✗ API call failed: {exc.message}[/bold red]\n"
-            )
+            self.console.print(f"[bold red]✗ API call failed: {exc.message}[/bold red]\n")
             return WorkRequestResult(
                 description=f"Update node pool {node_pool_id}",
                 status="FAILED",
@@ -2218,7 +2206,6 @@ class NodePoolImageUpdater:
             status="SUBMITTED",
             errors=[message],
         )
-
 
     def _wait_for_work_request(
         self, context: CompartmentContext, work_request_id: str, description: str
@@ -2377,12 +2364,7 @@ class NodePoolImageUpdater:
         def html_escape(value: Optional[str]) -> str:
             if value is None:
                 return ""
-            return (
-                str(value)
-                .replace("&", "&amp;")
-                .replace("<", "&lt;")
-                .replace(">", "&gt;")
-            )
+            return str(value).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
         def format_datetime_local(value: Optional[datetime]) -> str:
             if value is None:
@@ -2433,28 +2415,18 @@ class NodePoolImageUpdater:
         html.append(f"<li><strong>Operator:</strong> {html_escape(operator_name)}</li>")
         html.append(f"<li><strong>Generated:</strong> {html_escape(generated_at_display)}</li>")
         if self._timestamp_label:
-            html.append(
-                f"<li><strong>Run ID:</strong> {html_escape(self._timestamp_label)}</li>"
-            )
+            html.append(f"<li><strong>Run ID:</strong> {html_escape(self._timestamp_label)}</li>")
         html.append(f"<li><strong>CSV Source:</strong> {html_escape(str(self.csv_path))}</li>")
         html.append(f"<li><strong>Meta Source:</strong> {html_escape(str(self.meta_file))}</li>")
         config_display = self.config_file if self.config_file else "~/.oci/config (default)"
-        html.append(
-            f"<li><strong>Config File:</strong> {html_escape(str(config_display))}</li>"
-        )
-        html.append(
-            f"<li><strong>Regions Evaluated:</strong> {html_escape(region_value)}</li>"
-        )
-        html.append(
-            f"<li><strong>Dry Run:</strong> {'Yes' if self.dry_run else 'No'}</li>"
-        )
+        html.append(f"<li><strong>Config File:</strong> {html_escape(str(config_display))}</li>")
+        html.append(f"<li><strong>Regions Evaluated:</strong> {html_escape(region_value)}</li>")
+        html.append(f"<li><strong>Dry Run:</strong> {'Yes' if self.dry_run else 'No'}</li>")
         html.append(
             f"<li><strong>Rows Processed:</strong> {self._total_rows} (resolved {self._resolved_rows}, skipped {len(self._missing_hosts)})</li>"
         )
         if self._log_path:
-            html.append(
-                f"<li><strong>Log File:</strong> {html_escape(str(self._log_path))}</li>"
-            )
+            html.append(f"<li><strong>Log File:</strong> {html_escape(str(self._log_path))}</li>")
         html.append("</ul>")
         html.append("</section>")
 
@@ -2462,11 +2434,11 @@ class NodePoolImageUpdater:
         html.append("<h2>OKE Node Pool Operations</h2>")
         html.append(
             '<table class="summary-table"><thead><tr>'
-            '<th>Node Pool</th><th>Compartment</th><th>Project</th><th>Environment</th>'
-            '<th>Region</th><th>Image (Before)</th><th>Image (After)</th>'
-            '<th>Update Initiated</th><th>Work Request ID</th><th>Status</th>'
-            '<th>Duration (s)</th><th>Healthy/Total</th><th>Details</th>'
-            '</tr></thead><tbody>'
+            "<th>Node Pool</th><th>Compartment</th><th>Project</th><th>Environment</th>"
+            "<th>Region</th><th>Image (Before)</th><th>Image (After)</th>"
+            "<th>Update Initiated</th><th>Work Request ID</th><th>Status</th>"
+            "<th>Duration (s)</th><th>Healthy/Total</th><th>Details</th>"
+            "</tr></thead><tbody>"
         )
 
         if not self._summaries:
@@ -2483,12 +2455,20 @@ class NodePoolImageUpdater:
                 )
 
                 # Timestamp when update was initiated
-                initiated_at = format_datetime_local(summary.update_initiated_at) if summary.update_initiated_at else "—"
+                initiated_at = (
+                    format_datetime_local(summary.update_initiated_at)
+                    if summary.update_initiated_at
+                    else "—"
+                )
 
                 # Work request ID with colored status
                 work_request_id = update_result.work_request_id if update_result else None
                 if work_request_id:
-                    wr_short = work_request_id.split(".")[-1][:12] if "." in work_request_id else work_request_id[:12]
+                    wr_short = (
+                        work_request_id.split(".")[-1][:12]
+                        if "." in work_request_id
+                        else work_request_id[:12]
+                    )
                     work_request_html = f'<code class="{status_class}" title="{html_escape(work_request_id)}">{html_escape(wr_short)}...</code>'
                 else:
                     work_request_html = "—"
@@ -2515,11 +2495,15 @@ class NodePoolImageUpdater:
                 if summary.cycling_config:
                     config_details.append("<strong>Node Cycling Config:</strong>")
                     for key, val in summary.cycling_config.items():
-                        config_details.append(f"&nbsp;&nbsp;• {key}: <code>{html_escape(str(val))}</code>")
+                        config_details.append(
+                            f"&nbsp;&nbsp;• {key}: <code>{html_escape(str(val))}</code>"
+                        )
                 if summary.eviction_config:
                     config_details.append("<strong>Eviction Settings:</strong>")
                     for key, val in summary.eviction_config.items():
-                        config_details.append(f"&nbsp;&nbsp;• {key}: <code>{html_escape(str(val))}</code>")
+                        config_details.append(
+                            f"&nbsp;&nbsp;• {key}: <code>{html_escape(str(val))}</code>"
+                        )
 
                 details_html = f'<details><summary>Show Config</summary><div style="padding:8px;background:#f5f5f5;margin-top:4px;">{"<br/>".join(config_details) if config_details else "No config details"}</div></details>'
 
@@ -2567,14 +2551,24 @@ class NodePoolImageUpdater:
                 status_class = f"status-{status}"
 
                 # Timestamps
-                initiated_at = format_datetime_local(summary.update_initiated_at) if summary.update_initiated_at else "—"
-                config_created_at = format_datetime_local(summary.config_created_at) if summary.config_created_at else "—"
+                initiated_at = (
+                    format_datetime_local(summary.update_initiated_at)
+                    if summary.update_initiated_at
+                    else "—"
+                )
+                config_created_at = (
+                    format_datetime_local(summary.config_created_at)
+                    if summary.config_created_at
+                    else "—"
+                )
 
                 # New config ID (shortened)
                 new_config_short = ""
                 if summary.new_instance_config_id:
                     parts = summary.new_instance_config_id.split(".")
-                    new_config_short = f"...{parts[-1][:12]}" if parts else summary.new_instance_config_id[:15]
+                    new_config_short = (
+                        f"...{parts[-1][:12]}" if parts else summary.new_instance_config_id[:15]
+                    )
 
                 # Image details
                 before_html = (
@@ -2588,10 +2582,16 @@ class NodePoolImageUpdater:
 
                 # Configuration details
                 config_details = []
-                config_details.append(f"<strong>Original Config ID:</strong><br/><code>{html_escape(summary.original_instance_config_id or 'N/A')}</code>")
-                config_details.append(f"<strong>New Config ID:</strong><br/><code>{html_escape(summary.new_instance_config_id or 'N/A')}</code>")
+                config_details.append(
+                    f"<strong>Original Config ID:</strong><br/><code>{html_escape(summary.original_instance_config_id or 'N/A')}</code>"
+                )
+                config_details.append(
+                    f"<strong>New Config ID:</strong><br/><code>{html_escape(summary.new_instance_config_id or 'N/A')}</code>"
+                )
                 config_details.append(f"<strong>Max Surge:</strong> 4 instances")
-                config_details.append(f"<strong>is_decrement_size:</strong> False (maintains capacity)")
+                config_details.append(
+                    f"<strong>is_decrement_size:</strong> False (maintains capacity)"
+                )
                 config_details.append(f"<strong>is_auto_terminate:</strong> True (auto-cleanup)")
 
                 details_html = f'<details><summary>Show Config</summary><div style="padding:8px;background:#f5f5f5;margin-top:4px;">{"<br/>".join(config_details)}</div></details>'
@@ -2603,7 +2603,9 @@ class NodePoolImageUpdater:
                 html.append(f"<td>{after_html}</td>")
                 html.append(f"<td>{initiated_at}</td>")
                 html.append(f"<td>{config_created_at}</td>")
-                html.append(f"<td><code title='{html_escape(summary.new_instance_config_id or '')}'>{html_escape(new_config_short) or '—'}</code></td>")
+                html.append(
+                    f"<td><code title='{html_escape(summary.new_instance_config_id or '')}'>{html_escape(new_config_short) or '—'}</code></td>"
+                )
                 html.append(f"<td class='{status_class}'>{html_escape(status)}</td>")
                 html.append(f"<td>{summary.detached_count} / {len(summary.instance_results)}</td>")
                 html.append(f"<td>{html_escape(summary.post_state or '—')}</td>")

@@ -86,24 +86,32 @@ oci session authenticate --profile-name DEFAULT --region us-phoenix-1
 
 ### Step 6: Configure Project Mappings
 
-Create or update `tools/meta.yaml` with your OCI project/stage/region mappings:
+Create or update `tools/meta.yaml` with your OCI project/stage/realm/tenancy/region mappings:
 
 ```yaml
 projects:
   my-project:
     dev:
       oc1:
+        tenancy-ocid: ocid1.tenancy.oc1..aaaaaaaah3k3f5rk...
+        tenancy-name: "my-dev-tenancy"
         us-phoenix-1:
           compartment_id: ocid1.compartment.oc1..aaaaaaaah3k3f5rk...
     staging:
       oc1:
+        tenancy-ocid: ocid1.tenancy.oc1..aaaaaaaasrzpupgd...
+        tenancy-name: "my-staging-tenancy"
         us-ashburn-1:
           compartment_id: ocid1.compartment.oc1..aaaaaaaasrzpupgd...
     prod:
       oc17:
+        tenancy-ocid: ocid1.tenancy.oc17..aaaaaaaasaow4j73...
+        tenancy-name: "my-prod-tenancy"
         us-dcc-phoenix-1:
           compartment_id: ocid1.compartment.oc17..aaaaaaaasaow4j73...
 ```
+
+Each realm contains exactly one tenancy, and each tenancy can have multiple compartments across multiple regions.
 
 ### Step 7: Add MCP Server to OpenCode
 

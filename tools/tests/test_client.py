@@ -103,9 +103,7 @@ class TestOCIClient:
 
     def test_lazy_loading_container_engine_client(self, mock_client):
         """Test lazy loading of container engine client."""
-        with patch(
-            "src.oci_client.client.oci.container_engine.ContainerEngineClient"
-        ) as mock_ce:
+        with patch("src.oci_client.client.oci.container_engine.ContainerEngineClient") as mock_ce:
             assert mock_client._container_engine_client is None
 
             _ = mock_client.container_engine_client

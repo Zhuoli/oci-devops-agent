@@ -26,13 +26,9 @@ from typing import Any, Dict, List, Optional, Sequence
 
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
-from mcp.types import Tool, TextContent
-
-from oci.container_engine.models import (
-    NodePoolCyclingDetails,
-    UpdateNodePoolDetails,
-)
+from mcp.types import TextContent, Tool
 from oci import exceptions as oci_exceptions
+from oci.container_engine.models import NodePoolCyclingDetails, UpdateNodePoolDetails
 
 from oci_client.client import OCIClient
 from oci_client.models import (
@@ -676,7 +672,12 @@ async def _list_oke_clusters(arguments: Dict[str, Any]) -> List[TextContent]:
 
     compartment_id = _get_compartment_id(project, stage, region, config_file)
     if not compartment_id:
-        return [TextContent(type="text", text=f"Error: Could not find compartment ID for {project}/{stage}/{region}")]
+        return [
+            TextContent(
+                type="text",
+                text=f"Error: Could not find compartment ID for {project}/{stage}/{region}",
+            )
+        ]
 
     try:
         clusters = client.list_oke_clusters(compartment_id)
@@ -747,58 +748,78 @@ async def _upgrade_oke_cluster(arguments: Dict[str, Any]) -> List[TextContent]:
         # Determine target version
         if not target_version:
             if not cluster.available_upgrades:
-                return [TextContent(
-                    type="text",
-                    text=json.dumps({
-                        "status": "no_upgrade_needed",
-                        "cluster_id": cluster_id,
-                        "cluster_name": cluster.name,
-                        "current_version": cluster.kubernetes_version,
-                        "message": "No upgrades available for this cluster",
-                    }, indent=2)
-                )]
+                return [
+                    TextContent(
+                        type="text",
+                        text=json.dumps(
+                            {
+                                "status": "no_upgrade_needed",
+                                "cluster_id": cluster_id,
+                                "cluster_name": cluster.name,
+                                "current_version": cluster.kubernetes_version,
+                                "message": "No upgrades available for this cluster",
+                            },
+                            indent=2,
+                        ),
+                    )
+                ]
             # Use the latest available upgrade
             target_version = max(cluster.available_upgrades)
 
         # Validate target version is available
         if target_version not in cluster.available_upgrades:
-            return [TextContent(
-                type="text",
-                text=json.dumps({
-                    "status": "error",
-                    "message": f"Target version {target_version} is not available",
-                    "available_upgrades": cluster.available_upgrades,
-                }, indent=2)
-            )]
+            return [
+                TextContent(
+                    type="text",
+                    text=json.dumps(
+                        {
+                            "status": "error",
+                            "message": f"Target version {target_version} is not available",
+                            "available_upgrades": cluster.available_upgrades,
+                        },
+                        indent=2,
+                    ),
+                )
+            ]
 
         if dry_run:
-            return [TextContent(
-                type="text",
-                text=json.dumps({
-                    "status": "dry_run",
-                    "cluster_id": cluster_id,
-                    "cluster_name": cluster.name,
-                    "current_version": cluster.kubernetes_version,
-                    "target_version": target_version,
-                    "message": f"Would upgrade cluster from {cluster.kubernetes_version} to {target_version}",
-                }, indent=2)
-            )]
+            return [
+                TextContent(
+                    type="text",
+                    text=json.dumps(
+                        {
+                            "status": "dry_run",
+                            "cluster_id": cluster_id,
+                            "cluster_name": cluster.name,
+                            "current_version": cluster.kubernetes_version,
+                            "target_version": target_version,
+                            "message": f"Would upgrade cluster from {cluster.kubernetes_version} to {target_version}",
+                        },
+                        indent=2,
+                    ),
+                )
+            ]
 
         # Perform the upgrade
         work_request_id = client.upgrade_oke_cluster(cluster_id, target_version)
 
-        return [TextContent(
-            type="text",
-            text=json.dumps({
-                "status": "initiated",
-                "cluster_id": cluster_id,
-                "cluster_name": cluster.name,
-                "current_version": cluster.kubernetes_version,
-                "target_version": target_version,
-                "work_request_id": work_request_id,
-                "message": f"Cluster upgrade initiated. Track progress with work request: {work_request_id}",
-            }, indent=2)
-        )]
+        return [
+            TextContent(
+                type="text",
+                text=json.dumps(
+                    {
+                        "status": "initiated",
+                        "cluster_id": cluster_id,
+                        "cluster_name": cluster.name,
+                        "current_version": cluster.kubernetes_version,
+                        "target_version": target_version,
+                        "work_request_id": work_request_id,
+                        "message": f"Cluster upgrade initiated. Track progress with work request: {work_request_id}",
+                    },
+                    indent=2,
+                ),
+            )
+        ]
     except Exception as e:
         return [TextContent(type="text", text=f"Error upgrading cluster: {str(e)}")]
 
@@ -845,29 +866,39 @@ async def _upgrade_node_pool(arguments: Dict[str, Any]) -> List[TextContent]:
 
     try:
         if dry_run:
-            return [TextContent(
-                type="text",
-                text=json.dumps({
-                    "status": "dry_run",
-                    "node_pool_id": node_pool_id,
-                    "target_version": target_version,
-                    "message": f"Would upgrade node pool to {target_version}",
-                }, indent=2)
-            )]
+            return [
+                TextContent(
+                    type="text",
+                    text=json.dumps(
+                        {
+                            "status": "dry_run",
+                            "node_pool_id": node_pool_id,
+                            "target_version": target_version,
+                            "message": f"Would upgrade node pool to {target_version}",
+                        },
+                        indent=2,
+                    ),
+                )
+            ]
 
         # Perform the upgrade
         work_request_id = client.upgrade_oke_node_pool(node_pool_id, target_version)
 
-        return [TextContent(
-            type="text",
-            text=json.dumps({
-                "status": "initiated",
-                "node_pool_id": node_pool_id,
-                "target_version": target_version,
-                "work_request_id": work_request_id,
-                "message": f"Node pool upgrade initiated. Note: Existing nodes need to be cycled to pick up the new version.",
-            }, indent=2)
-        )]
+        return [
+            TextContent(
+                type="text",
+                text=json.dumps(
+                    {
+                        "status": "initiated",
+                        "node_pool_id": node_pool_id,
+                        "target_version": target_version,
+                        "work_request_id": work_request_id,
+                        "message": f"Node pool upgrade initiated. Note: Existing nodes need to be cycled to pick up the new version.",
+                    },
+                    indent=2,
+                ),
+            )
+        ]
     except Exception as e:
         return [TextContent(type="text", text=f"Error upgrading node pool: {str(e)}")]
 
@@ -897,19 +928,24 @@ async def _cycle_node_pool(arguments: Dict[str, Any]) -> List[TextContent]:
         nodes = getattr(node_pool_details, "nodes", []) or []
 
         if dry_run:
-            return [TextContent(
-                type="text",
-                text=json.dumps({
-                    "status": "dry_run",
-                    "node_pool_id": node_pool_id,
-                    "node_pool_name": node_pool_name,
-                    "current_version": current_version,
-                    "node_count": len(nodes),
-                    "maximum_unavailable": maximum_unavailable,
-                    "maximum_surge": maximum_surge,
-                    "message": f"Would cycle {len(nodes)} node(s) in pool '{node_pool_name}' using boot volume replacement",
-                }, indent=2)
-            )]
+            return [
+                TextContent(
+                    type="text",
+                    text=json.dumps(
+                        {
+                            "status": "dry_run",
+                            "node_pool_id": node_pool_id,
+                            "node_pool_name": node_pool_name,
+                            "current_version": current_version,
+                            "node_count": len(nodes),
+                            "maximum_unavailable": maximum_unavailable,
+                            "maximum_surge": maximum_surge,
+                            "message": f"Would cycle {len(nodes)} node(s) in pool '{node_pool_name}' using boot volume replacement",
+                        },
+                        indent=2,
+                    ),
+                )
+            ]
 
         # Create cycling configuration
         cycling_details = NodePoolCyclingDetails(
@@ -928,19 +964,24 @@ async def _cycle_node_pool(arguments: Dict[str, Any]) -> List[TextContent]:
         response = ce_client.update_node_pool(node_pool_id, update_details)
         work_request_id = response.headers.get("opc-work-request-id")
 
-        return [TextContent(
-            type="text",
-            text=json.dumps({
-                "status": "initiated",
-                "node_pool_id": node_pool_id,
-                "node_pool_name": node_pool_name,
-                "node_count": len(nodes),
-                "maximum_unavailable": maximum_unavailable,
-                "maximum_surge": maximum_surge,
-                "work_request_id": work_request_id,
-                "message": f"Node pool cycling initiated. Nodes will be replaced with boot volume replacement.",
-            }, indent=2)
-        )]
+        return [
+            TextContent(
+                type="text",
+                text=json.dumps(
+                    {
+                        "status": "initiated",
+                        "node_pool_id": node_pool_id,
+                        "node_pool_name": node_pool_name,
+                        "node_count": len(nodes),
+                        "maximum_unavailable": maximum_unavailable,
+                        "maximum_surge": maximum_surge,
+                        "work_request_id": work_request_id,
+                        "message": f"Node pool cycling initiated. Nodes will be replaced with boot volume replacement.",
+                    },
+                    indent=2,
+                ),
+            )
+        ]
     except oci_exceptions.ServiceError as e:
         return [TextContent(type="text", text=f"OCI Service Error: {e.message}")]
     except Exception as e:
@@ -1088,13 +1129,15 @@ async def _list_cluster_nodes(arguments: Dict[str, Any]) -> List[TextContent]:
 
                     # Track unhealthy nodes (not ACTIVE)
                     if state not in ("ACTIVE", "CREATING"):
-                        unhealthy_nodes.append({
-                            "node_id": node_data.get("node_id"),
-                            "name": node_data.get("name"),
-                            "lifecycle_state": state,
-                            "node_pool_name": np.name,
-                            "node_error": node_data.get("node_error"),
-                        })
+                        unhealthy_nodes.append(
+                            {
+                                "node_id": node_data.get("node_id"),
+                                "name": node_data.get("name"),
+                                "lifecycle_state": state,
+                                "node_pool_name": np.name,
+                                "node_error": node_data.get("node_error"),
+                            }
+                        )
 
             except Exception as e:
                 logger.warning(f"Failed to get nodes for node pool {np.node_pool_id}: {e}")
@@ -1146,12 +1189,14 @@ async def _get_node_pool_details(arguments: Dict[str, Any]) -> List[TextContent]
             nodes_by_state[state] = nodes_by_state.get(state, 0) + 1
 
             if state not in ("ACTIVE", "CREATING"):
-                unhealthy_nodes.append({
-                    "node_id": node_data.get("node_id"),
-                    "name": node_data.get("name"),
-                    "lifecycle_state": state,
-                    "node_error": node_data.get("node_error"),
-                })
+                unhealthy_nodes.append(
+                    {
+                        "node_id": node_data.get("node_id"),
+                        "name": node_data.get("name"),
+                        "lifecycle_state": state,
+                        "node_error": node_data.get("node_error"),
+                    }
+                )
 
         # Get node source info (image details)
         node_source = getattr(np_details, "node_source", None)
@@ -1200,7 +1245,12 @@ async def _check_node_image_updates(arguments: Dict[str, Any]) -> List[TextConte
 
     compartment_id = _get_compartment_id(project, stage, region, config_file)
     if not compartment_id:
-        return [TextContent(type="text", text=f"Error: Could not find compartment ID for {project}/{stage}/{region}")]
+        return [
+            TextContent(
+                type="text",
+                text=f"Error: Could not find compartment ID for {project}/{stage}/{region}",
+            )
+        ]
 
     try:
         compute_client = client.compute_client
@@ -1224,30 +1274,34 @@ async def _check_node_image_updates(arguments: Dict[str, Any]) -> List[TextConte
                     for node in nodes:
                         node_id = getattr(node, "id", None)
                         if node_id and getattr(node, "lifecycle_state", None) == "ACTIVE":
-                            nodes_to_check.append({
-                                "node_id": node_id,
-                                "node_name": getattr(node, "name", node_id),
-                                "node_pool_id": np.node_pool_id,
-                                "node_pool_name": np.name,
-                                "pool_image_id": pool_image_id,
-                                "cluster_id": cluster_id,
-                                "cluster_name": cluster.name,
-                            })
+                            nodes_to_check.append(
+                                {
+                                    "node_id": node_id,
+                                    "node_name": getattr(node, "name", node_id),
+                                    "node_pool_id": np.node_pool_id,
+                                    "node_pool_name": np.name,
+                                    "pool_image_id": pool_image_id,
+                                    "cluster_id": cluster_id,
+                                    "cluster_name": cluster.name,
+                                }
+                            )
                 except Exception as e:
                     logger.warning(f"Failed to get nodes for node pool {np.node_pool_id}: {e}")
         else:
             # Get all running instances in compartment and detect OKE nodes
             instances = client.list_oke_instances(compartment_id)
             for inst in instances:
-                nodes_to_check.append({
-                    "node_id": inst.instance_id,
-                    "node_name": inst.display_name,
-                    "node_pool_id": None,
-                    "node_pool_name": None,
-                    "pool_image_id": None,
-                    "cluster_id": None,
-                    "cluster_name": inst.cluster_name,
-                })
+                nodes_to_check.append(
+                    {
+                        "node_id": inst.instance_id,
+                        "node_name": inst.display_name,
+                        "node_pool_id": None,
+                        "node_pool_name": None,
+                        "pool_image_id": None,
+                        "cluster_id": None,
+                        "cluster_name": inst.cluster_name,
+                    }
+                )
 
         # Check each node for image updates
         results = []
@@ -1285,7 +1339,9 @@ async def _check_node_image_updates(arguments: Dict[str, Any]) -> List[TextConte
                 # Get current image details
                 try:
                     current_image = compute_client.get_image(image_id).data
-                    node_result["current_image_name"] = getattr(current_image, "display_name", image_id)
+                    node_result["current_image_name"] = getattr(
+                        current_image, "display_name", image_id
+                    )
 
                     # Try to find LATEST image of same type
                     image_compartment_id = getattr(current_image, "compartment_id", None)
@@ -1307,6 +1363,7 @@ async def _check_node_image_updates(arguments: Dict[str, Any]) -> List[TextConte
 
                     # Search for LATEST image with same type
                     from oci.pagination import list_call_get_all_results
+
                     images = list_call_get_all_results(
                         compute_client.list_images,
                         compartment_id=image_compartment_id,
@@ -1396,7 +1453,12 @@ async def _list_devops_projects(arguments: Dict[str, Any]) -> List[TextContent]:
 
     compartment_id = _get_compartment_id(project, stage, region, config_file)
     if not compartment_id:
-        return [TextContent(type="text", text=f"Error: Could not find compartment ID for {project}/{stage}/{region}")]
+        return [
+            TextContent(
+                type="text",
+                text=f"Error: Could not find compartment ID for {project}/{stage}/{region}",
+            )
+        ]
 
     try:
         projects = client.list_devops_projects(compartment_id)
@@ -1427,7 +1489,12 @@ async def _list_deployment_pipelines(arguments: Dict[str, Any]) -> List[TextCont
 
     compartment_id = _get_compartment_id(project, stage, region, config_file)
     if not compartment_id:
-        return [TextContent(type="text", text=f"Error: Could not find compartment ID for {project}/{stage}/{region}")]
+        return [
+            TextContent(
+                type="text",
+                text=f"Error: Could not find compartment ID for {project}/{stage}/{region}",
+            )
+        ]
 
     try:
         pipelines = client.list_deployment_pipelines(
@@ -1465,17 +1532,22 @@ async def _get_recent_deployment(arguments: Dict[str, Any]) -> List[TextContent]
         deployments = client.get_recent_deployment(pipeline_id, limit=limit)
 
         if not deployments:
-            return [TextContent(
-                type="text",
-                text=json.dumps({
-                    "project": project,
-                    "stage": stage,
-                    "region": region,
-                    "pipeline_id": pipeline_id,
-                    "deployment_count": 0,
-                    "message": "No deployments found for this pipeline",
-                }, indent=2)
-            )]
+            return [
+                TextContent(
+                    type="text",
+                    text=json.dumps(
+                        {
+                            "project": project,
+                            "stage": stage,
+                            "region": region,
+                            "pipeline_id": pipeline_id,
+                            "deployment_count": 0,
+                            "message": "No deployments found for this pipeline",
+                        },
+                        indent=2,
+                    ),
+                )
+            ]
 
         # Build a summary for each deployment
         deployment_summaries = []
@@ -1493,11 +1565,13 @@ async def _get_recent_deployment(arguments: Dict[str, Any]) -> List[TextContent]
                 )
                 for stage_id, stage_info in stage_progress.items():
                     if stage_info.get("status") in ("FAILED", "CANCELED", "ROLLBACK_FAILED"):
-                        failed_stages.append({
-                            "stage_id": stage_id,
-                            "display_name": stage_info.get("deploy_stage_display_name"),
-                            "status": stage_info.get("status"),
-                        })
+                        failed_stages.append(
+                            {
+                                "stage_id": stage_id,
+                                "display_name": stage_info.get("deploy_stage_display_name"),
+                                "status": stage_info.get("status"),
+                            }
+                        )
 
             summary = {
                 "deployment_id": deployment.deployment_id,
@@ -1567,4 +1641,5 @@ async def main() -> None:
 
 if __name__ == "__main__":
     import asyncio
+
     asyncio.run(main())

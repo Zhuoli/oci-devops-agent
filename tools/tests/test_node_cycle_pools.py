@@ -1,6 +1,5 @@
-from pathlib import Path
-
 import webbrowser
+from pathlib import Path
 
 import pytest
 

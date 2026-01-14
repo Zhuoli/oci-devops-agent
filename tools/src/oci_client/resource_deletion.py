@@ -8,10 +8,10 @@ their own CLI arguments while sharing the common setup for OCI authentication.
 from __future__ import annotations
 
 import argparse
-from abc import ABC, abstractmethod
-from dataclasses import dataclass
 import time
+from abc import ABC, abstractmethod
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass
 from typing import Dict, Iterable, List, Optional
 
 import oci
@@ -335,16 +335,12 @@ class BucketDeletionCommand(BaseDeletionCommand):
                 try:
                     future.result()
                 except ServiceError as exc:
-                    errors.append(
-                        f"{item['object_name']}: {exc.code} - {exc.message}"
-                    )
+                    errors.append(f"{item['object_name']}: {exc.code} - {exc.message}")
                 except Exception as exc:  # pragma: no cover - unexpected
                     errors.append(f"{item['object_name']}: {exc}")
 
         if errors:
-            raise ResourceDeletionError(
-                f"Failed to delete {len(errors)} {action}: {errors[0]}"
-            )
+            raise ResourceDeletionError(f"Failed to delete {len(errors)} {action}: {errors[0]}")
 
         if is_version_batch:
             counts.deleted_versions += len(batch)
@@ -366,9 +362,7 @@ class BucketDeletionCommand(BaseDeletionCommand):
         version_id = item.get("version_id")
 
         if version_id:
-            console.print(
-                f"[dim]Deleting object '{object_name}' (version '{version_id}')[/dim]"
-            )
+            console.print(f"[dim]Deleting object '{object_name}' (version '{version_id}')[/dim]")
             object_storage.delete_object(
                 namespace_name=namespace,
                 bucket_name=bucket_name,
@@ -445,9 +439,7 @@ class OKEDeletionCommand(BaseDeletionCommand):
             response = ce_client.delete_cluster(cluster_id)
         except ServiceError as exc:
             if exc.status == 404:
-                console.print(
-                    f"[yellow]Cluster '{cluster_name}' already deleted.[/yellow]"
-                )
+                console.print(f"[yellow]Cluster '{cluster_name}' already deleted.[/yellow]")
                 return
             raise ResourceDeletionError(
                 f"Failed to delete cluster '{cluster_name}': {exc.code} - {exc.message}"
@@ -488,7 +480,9 @@ class OKEDeletionCommand(BaseDeletionCommand):
             console.print("[dim]No node pools found for cluster.[/dim]")
             return
 
-        console.print(f"[dim]Deleting {len(node_pools)} node pool(s) before cluster deletion.[/dim]")
+        console.print(
+            f"[dim]Deleting {len(node_pools)} node pool(s) before cluster deletion.[/dim]"
+        )
 
         for node_pool in node_pools:
             node_pool_id = getattr(node_pool, "id", None)
@@ -496,16 +490,12 @@ class OKEDeletionCommand(BaseDeletionCommand):
             if not node_pool_id:
                 continue
 
-            console.print(
-                f"[dim]Deleting node pool '{node_pool_name}' ({node_pool_id})[/dim]"
-            )
+            console.print(f"[dim]Deleting node pool '{node_pool_name}' ({node_pool_id})[/dim]")
             try:
                 response = ce_client.delete_node_pool(node_pool_id)
             except ServiceError as exc:
                 if exc.status == 404:
-                    console.print(
-                        f"[yellow]Node pool '{node_pool_name}' already deleted.[/yellow]"
-                    )
+                    console.print(f"[yellow]Node pool '{node_pool_name}' already deleted.[/yellow]")
                     continue
                 raise ResourceDeletionError(
                     f"Failed to delete node pool '{node_pool_name}': {exc.code} - {exc.message}"
@@ -556,9 +546,7 @@ class OKEDeletionCommand(BaseDeletionCommand):
         console: Console,
         resource_label: str,
     ) -> None:
-        console.print(
-            f"[dim]Waiting for work request '{work_request_id}' ({resource_label})[/dim]"
-        )
+        console.print(f"[dim]Waiting for work request '{work_request_id}' ({resource_label})[/dim]")
 
         attempts = 0
         while attempts < self._work_request_max_attempts:
