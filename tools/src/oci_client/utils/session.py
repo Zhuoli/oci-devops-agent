@@ -13,8 +13,10 @@ from rich.console import Console
 
 try:
     import oci
+    from oci.auth.signers import SecurityTokenSigner
 except ImportError:
     oci = None
+    SecurityTokenSigner = None
 
 from ..client import OCIClient, create_oci_session_token
 from .display import display_error, display_session_token_header, display_success, display_warning
@@ -80,7 +82,7 @@ def check_session_token_validity(
     logger.info(f"[SESSION_CHECK] Checking session token validity for profile '{profile_name}'")
     logger.info(f"[SESSION_CHECK] Expected region: {expected_region}")
 
-    if not oci:
+    if not oci or not SecurityTokenSigner:
         logger.warning("[SESSION_CHECK] FAILED: OCI SDK not available")
         return False
 
@@ -161,11 +163,14 @@ def check_session_token_validity(
         logger.info("[SESSION_CHECK] Validating token with API call to get_tenancy()...")
         try:
             # Read the token file to create a security token signer
+            logger.info("[SESSION_CHECK] Creating SecurityTokenSigner for validation...")
             token_file = config["security_token_file"]
             with open(token_file, "r") as f:
                 token = f.read().strip()
 
-            private_key = oci.signer.load_private_key_from_file(config["key_file"])
+            key_file = config["key_file"]
+            logger.info(f"[SESSION_CHECK] Loading private key from: {key_file}")
+            private_key = oci.signer.load_private_key_from_file(key_file)
             signer = oci.auth.signers.SecurityTokenSigner(token, private_key)
 
             identity_client = oci.identity.IdentityClient(config, signer=signer)
