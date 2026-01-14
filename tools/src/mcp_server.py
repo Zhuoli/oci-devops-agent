@@ -132,7 +132,7 @@ def _get_client(
         Tuple of (client, error_message). If client is None, error_message describes the issue.
     """
     try:
-        profile_name = setup_session_token(project, stage, region)
+        profile_name = setup_session_token(project, stage, region, config_file=config_file)
         client = create_oci_client(region, profile_name)
         if not client:
             return None, f"Failed to initialize OCI client for region {region}"
