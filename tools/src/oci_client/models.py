@@ -49,6 +49,7 @@ class InstanceInfo:
     shape: Optional[str] = None
     availability_domain: Optional[str] = None
     fault_domain: Optional[str] = None
+    lifecycle_state: Optional[str] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
     tags: Dict[str, str] = field(default_factory=dict)
 
