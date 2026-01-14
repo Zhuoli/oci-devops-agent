@@ -19,31 +19,48 @@ from __future__ import annotations
 
 import json
 import logging
+import sys
+import traceback
 from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
 
-from mcp.server import Server
-from mcp.server.stdio import stdio_server
-from mcp.types import TextContent, Tool
-from oci import exceptions as oci_exceptions
-from oci.container_engine.models import NodePoolCyclingDetails, UpdateNodePoolDetails
-
-from oci_client.client import OCIClient
-from oci_client.models import (
-    DeploymentInfo,
-    DeploymentPipelineInfo,
-    DevOpsProjectInfo,
-    OKEClusterInfo,
-    OKENodePoolInfo,
+# Configure logging to file for debugging
+log_file = Path.cwd() / "mcp_server.log"
+logging.basicConfig(
+    level=logging.DEBUG,
+    format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
+    handlers=[
+        logging.FileHandler(log_file),
+        logging.StreamHandler(sys.stderr),
+    ],
 )
-from oci_client.utils.config import load_region_compartments
-from oci_client.utils.session import create_oci_client, setup_session_token
-
-# Configure logging
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+logger.info(f"MCP Server starting, log file: {log_file}")
+
+try:
+    from mcp.server import Server
+    from mcp.server.stdio import stdio_server
+    from mcp.types import TextContent, Tool
+    from oci import exceptions as oci_exceptions
+    from oci.container_engine.models import NodePoolCyclingDetails, UpdateNodePoolDetails
+
+    from oci_client.client import OCIClient
+    from oci_client.models import (
+        DeploymentInfo,
+        DeploymentPipelineInfo,
+        DevOpsProjectInfo,
+        OKEClusterInfo,
+        OKENodePoolInfo,
+    )
+    from oci_client.utils.config import load_region_compartments
+    from oci_client.utils.session import create_oci_client, setup_session_token
+    logger.info("All imports successful")
+except Exception as e:
+    logger.error(f"Import error: {e}")
+    logger.error(traceback.format_exc())
+    raise
 
 # Create MCP server instance
 server = Server("oke-operations")
