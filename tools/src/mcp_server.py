@@ -1509,6 +1509,122 @@ async def _get_node_pool_details(arguments: Dict[str, Any]) -> List[TextContent]
         return [TextContent(type="text", text=f"Error getting node pool details: {str(e)}")]
 
 
+def _check_single_node_image(
+    compute_client: Any,
+    node_info: Dict[str, Any],
+    image_cache: Dict[str, Any],
+    latest_image_cache: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Check a single node for image updates. Used for parallel processing."""
+    from oci.pagination import list_call_get_all_results
+
+    node_result = {
+        "node_id": node_info["node_id"],
+        "node_name": node_info["node_name"],
+        "node_pool_name": node_info["node_pool_name"],
+        "cluster_name": node_info["cluster_name"],
+        "current_image_name": None,
+        "current_image_id": None,
+        "latest_image_name": None,
+        "latest_image_id": None,
+        "needs_update": False,
+        "status": "unknown",
+    }
+
+    try:
+        # Get instance details to find current image
+        instance = compute_client.get_instance(node_info["node_id"]).data
+        image_id = getattr(instance, "image_id", None) or node_info.get("pool_image_id")
+
+        if not image_id:
+            node_result["status"] = "no_image_id"
+            return node_result
+
+        node_result["current_image_id"] = image_id
+
+        # Get current image details (with caching)
+        try:
+            if image_id in image_cache:
+                current_image = image_cache[image_id]
+            else:
+                current_image = compute_client.get_image(image_id).data
+                image_cache[image_id] = current_image
+
+            node_result["current_image_name"] = getattr(
+                current_image, "display_name", image_id
+            )
+
+            # Try to find LATEST image of same type
+            image_compartment_id = getattr(current_image, "compartment_id", None)
+            defined_tags = getattr(current_image, "defined_tags", {}) or {}
+
+            # Check for image type in defined tags
+            image_type = None
+            for namespace in ["ics_images", "icm_images"]:
+                ns_tags = defined_tags.get(namespace, {})
+                if isinstance(ns_tags, dict) and "type" in ns_tags:
+                    image_type = ns_tags["type"]
+                    break
+
+            if not image_type or not image_compartment_id:
+                node_result["status"] = "no_image_type_tag"
+                return node_result
+
+            # Search for LATEST image with same type (with caching)
+            cache_key = f"{image_compartment_id}:{image_type}"
+            if cache_key in latest_image_cache:
+                latest_image = latest_image_cache[cache_key]
+            else:
+                images = list_call_get_all_results(
+                    compute_client.list_images,
+                    compartment_id=image_compartment_id,
+                    sort_by="TIMECREATED",
+                    sort_order="DESC",
+                ).data
+
+                latest_image = None
+                for img in images:
+                    img_tags = getattr(img, "defined_tags", {}) or {}
+                    img_type = None
+                    release = None
+
+                    for namespace in ["ics_images", "icm_images"]:
+                        ns_tags = img_tags.get(namespace, {})
+                        if isinstance(ns_tags, dict):
+                            if "type" in ns_tags:
+                                img_type = ns_tags["type"]
+                            if "release" in ns_tags:
+                                release = ns_tags["release"]
+
+                    if img_type == image_type and release and release.upper() == "LATEST":
+                        latest_image = img
+                        break
+
+                latest_image_cache[cache_key] = latest_image
+
+            if latest_image:
+                latest_name = getattr(latest_image, "display_name", None)
+                latest_id = getattr(latest_image, "id", None)
+                node_result["latest_image_name"] = latest_name
+                node_result["latest_image_id"] = latest_id
+
+                if latest_id != image_id:
+                    node_result["needs_update"] = True
+                    node_result["status"] = "update_available"
+                else:
+                    node_result["status"] = "up_to_date"
+            else:
+                node_result["status"] = "no_latest_image_found"
+
+        except oci_exceptions.ServiceError as e:
+            node_result["status"] = f"image_lookup_error: {e.message}"
+
+    except oci_exceptions.ServiceError as e:
+        node_result["status"] = f"instance_lookup_error: {e.message}"
+
+    return node_result
+
+
 def _check_node_image_updates_sync(
     client: OCIClient,
     compartment_id: str,
@@ -1518,8 +1634,6 @@ def _check_node_image_updates_sync(
     cluster_id: Optional[str],
 ) -> Dict[str, Any]:
     """Synchronous helper for checking node image updates - runs blocking API calls."""
-    from oci.pagination import list_call_get_all_results
-
     compute_client = client.compute_client
     ce_client = client.container_engine_client
 
@@ -1570,116 +1684,45 @@ def _check_node_image_updates_sync(
                 }
             )
 
-    # Check each node for image updates
-    results = []
-    nodes_needing_update = 0
-    nodes_up_to_date = 0
-    nodes_unknown = 0
+    # Shared caches for image lookups (thread-safe via GIL for dict operations)
+    image_cache: Dict[str, Any] = {}
+    latest_image_cache: Dict[str, Any] = {}
 
-    for node_info in nodes_to_check:
-        node_result = {
-            "node_id": node_info["node_id"],
-            "node_name": node_info["node_name"],
-            "node_pool_name": node_info["node_pool_name"],
-            "cluster_name": node_info["cluster_name"],
-            "current_image_name": None,
-            "current_image_id": None,
-            "latest_image_name": None,
-            "latest_image_id": None,
-            "needs_update": False,
-            "status": "unknown",
+    # Process nodes in parallel using ThreadPoolExecutor
+    results = []
+    max_workers = min(10, len(nodes_to_check)) if nodes_to_check else 1
+
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {
+            executor.submit(
+                _check_single_node_image,
+                compute_client,
+                node_info,
+                image_cache,
+                latest_image_cache,
+            ): node_info
+            for node_info in nodes_to_check
         }
 
-        try:
-            # Get instance details to find current image
-            instance = compute_client.get_instance(node_info["node_id"]).data
-            image_id = getattr(instance, "image_id", None) or node_info.get("pool_image_id")
-
-            if not image_id:
-                node_result["status"] = "no_image_id"
-                nodes_unknown += 1
-                results.append(node_result)
-                continue
-
-            node_result["current_image_id"] = image_id
-
-            # Get current image details
+        for future in as_completed(futures):
             try:
-                current_image = compute_client.get_image(image_id).data
-                node_result["current_image_name"] = getattr(
-                    current_image, "display_name", image_id
-                )
+                result = future.result()
+                results.append(result)
+            except Exception as e:
+                node_info = futures[future]
+                results.append({
+                    "node_id": node_info["node_id"],
+                    "node_name": node_info["node_name"],
+                    "node_pool_name": node_info.get("node_pool_name"),
+                    "cluster_name": node_info.get("cluster_name"),
+                    "status": f"error: {str(e)}",
+                    "needs_update": False,
+                })
 
-                # Try to find LATEST image of same type
-                image_compartment_id = getattr(current_image, "compartment_id", None)
-                defined_tags = getattr(current_image, "defined_tags", {}) or {}
-
-                # Check for image type in defined tags
-                image_type = None
-                for namespace in ["ics_images", "icm_images"]:
-                    ns_tags = defined_tags.get(namespace, {})
-                    if isinstance(ns_tags, dict) and "type" in ns_tags:
-                        image_type = ns_tags["type"]
-                        break
-
-                if not image_type or not image_compartment_id:
-                    node_result["status"] = "no_image_type_tag"
-                    nodes_unknown += 1
-                    results.append(node_result)
-                    continue
-
-                # Search for LATEST image with same type
-                images = list_call_get_all_results(
-                    compute_client.list_images,
-                    compartment_id=image_compartment_id,
-                    sort_by="TIMECREATED",
-                    sort_order="DESC",
-                ).data
-
-                latest_image = None
-                for img in images:
-                    img_tags = getattr(img, "defined_tags", {}) or {}
-                    img_type = None
-                    release = None
-
-                    for namespace in ["ics_images", "icm_images"]:
-                        ns_tags = img_tags.get(namespace, {})
-                        if isinstance(ns_tags, dict):
-                            if "type" in ns_tags:
-                                img_type = ns_tags["type"]
-                            if "release" in ns_tags:
-                                release = ns_tags["release"]
-
-                    if img_type == image_type and release and release.upper() == "LATEST":
-                        latest_image = img
-                        break
-
-                if latest_image:
-                    latest_name = getattr(latest_image, "display_name", None)
-                    latest_id = getattr(latest_image, "id", None)
-                    node_result["latest_image_name"] = latest_name
-                    node_result["latest_image_id"] = latest_id
-
-                    if latest_id != image_id:
-                        node_result["needs_update"] = True
-                        node_result["status"] = "update_available"
-                        nodes_needing_update += 1
-                    else:
-                        node_result["status"] = "up_to_date"
-                        nodes_up_to_date += 1
-                else:
-                    node_result["status"] = "no_latest_image_found"
-                    nodes_unknown += 1
-
-            except oci_exceptions.ServiceError as e:
-                node_result["status"] = f"image_lookup_error: {e.message}"
-                nodes_unknown += 1
-
-        except oci_exceptions.ServiceError as e:
-            node_result["status"] = f"instance_lookup_error: {e.message}"
-            nodes_unknown += 1
-
-        results.append(node_result)
+    # Count results
+    nodes_needing_update = sum(1 for r in results if r.get("needs_update"))
+    nodes_up_to_date = sum(1 for r in results if r.get("status") == "up_to_date")
+    nodes_unknown = len(results) - nodes_needing_update - nodes_up_to_date
 
     # Build summary
     return {
@@ -1692,7 +1735,7 @@ def _check_node_image_updates_sync(
         "nodes_needing_update": nodes_needing_update,
         "nodes_up_to_date": nodes_up_to_date,
         "nodes_unknown": nodes_unknown,
-        "nodes_with_updates": [r for r in results if r["needs_update"]],
+        "nodes_with_updates": [r for r in results if r.get("needs_update")],
         "all_nodes": results,
     }
 
