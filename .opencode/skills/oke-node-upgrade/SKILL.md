@@ -1,6 +1,6 @@
 ---
 name: oke-node-upgrade
-description: Upgrade OKE node pools to latest node image version and cycle workers to apply new images. Use for regular node image maintenance, security patches, or OS updates without changing Kubernetes version.
+description: Upgrade OKE node pools to latest node image version and cycle workers to apply new images. Use for OS host patching, regular node image maintenance, security patches, or OS updates without changing Kubernetes version.
 metadata:
   version: "1.1"
   category: "devops"
@@ -27,6 +27,7 @@ This skill guides you through upgrading Oracle Kubernetes Engine (OKE) node pool
 
 ## When to Use This Skill
 
+- Do OS host patch / host patching on worker nodes
 - Apply security patches to worker nodes
 - Update to newer Oracle Linux images
 - Refresh node boot volumes with latest configurations

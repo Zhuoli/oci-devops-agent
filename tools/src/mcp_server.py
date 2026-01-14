@@ -290,8 +290,9 @@ async def list_tools() -> List[Tool]:
             name="check_node_image_updates",
             description=(
                 "Check if any worker nodes have outdated OS images that need updating. "
-                "Use when users ask: 'are there security patches needed?', 'do nodes need image updates?', "
-                "'which nodes are out of date?'. Compares current node images against latest available."
+                "Use when users ask: 'do os host patch', 'check os host patch status', 'are there host patches needed?', "
+                "'which nodes need patching?', 'are there security patches needed?', 'do nodes need image updates?'. "
+                "Compares current node images against latest available."
             ),
             inputSchema={
                 "type": "object",
@@ -517,7 +518,9 @@ async def list_tools() -> List[Tool]:
         Tool(
             name="cycle_node_pool",
             description=(
-                "MUTATING: Cycle OKE node pool workers by replacing their boot volumes to apply new images or versions. "
+                "MUTATING: Cycle OKE node pool workers by replacing their boot volumes to apply OS host patches, "
+                "new images, or Kubernetes versions. Use when users ask: 'apply os host patch', 'do host patching', "
+                "'patch the nodes', 'roll out os patches', 'cycle nodes for patching'. "
                 "REQUIRES USER APPROVAL. Always use dry_run=true first. "
                 "Nodes are cordoned, drained, terminated, and replaced. Use maximum_unavailable=1 for minimal disruption."
             ),
