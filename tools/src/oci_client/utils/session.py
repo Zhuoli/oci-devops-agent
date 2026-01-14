@@ -123,8 +123,17 @@ def check_session_token_validity(
         # that can access all other tenancies, so tenancy OCID won't match meta.yaml
 
         # Try to use the config to make a simple API call to verify it works
+        # Session token profiles need a SecurityTokenSigner, not the default signer
         try:
-            identity_client = oci.identity.IdentityClient(config)
+            # Read the token file to create a security token signer
+            token_file = config["security_token_file"]
+            with open(token_file, "r") as f:
+                token = f.read().strip()
+
+            private_key = oci.signer.load_private_key_from_file(config["key_file"])
+            signer = oci.auth.signers.SecurityTokenSigner(token, private_key)
+
+            identity_client = oci.identity.IdentityClient(config, signer=signer)
             # Make a simple API call to verify the token works
             identity_client.get_tenancy(config["tenancy"])
             return True
