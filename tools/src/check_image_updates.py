@@ -233,6 +233,47 @@ def _get_image_type(resource, verbose: bool = True) -> Optional[str]:
     return _safe_get_defined_tag(resource, "icm_images", "type", verbose=verbose)
 
 
+def _fetch_all_images_in_compartment(
+    compute_client: oci.core.compute_client.ComputeClient,
+    compartment_id: str,
+) -> List[oci.core.models.Image]:
+    """
+    Fetch all images in a compartment, sorted by creation time (newest first).
+    Returns empty list on error.
+    """
+    try:
+        return oci.pagination.list_call_get_all_results(
+            compute_client.list_images,
+            compartment_id=compartment_id,
+            sort_by="TIMECREATED",
+            sort_order="DESC",
+        ).data
+    except Exception as e:
+        console.print(
+            f"[red]Failed to list images in compartment {compartment_id}: {e}[/red]"
+        )
+        return []
+
+
+def _build_latest_images_cache(
+    images: List[oci.core.models.Image],
+) -> dict:
+    """
+    Build a cache mapping image_type -> latest image for images with release='LATEST'.
+    """
+    cache = {}
+    for img in images:
+        if not getattr(img, "defined_tags", None):
+            continue
+        img_type = _get_image_type(img, verbose=False)
+        release = _safe_get_defined_tag(img, "ics_images", "release", verbose=False)
+        if img_type and release and release.upper() == "LATEST":
+            # Only store the first (newest) one per type
+            if img_type not in cache:
+                cache[img_type] = img
+    return cache
+
+
 def _find_latest_image_with_same_type(
     compute_client: oci.core.compute_client.ComputeClient,
     image_compartment_id: str,
@@ -243,28 +284,13 @@ def _find_latest_image_with_same_type(
       - defined_tags.ics_images.type (or icm_images.type) == target_type
       - defined_tags.ics_images.release == 'LATEST'
     Returns the first match if found.
-    """
-    try:
-        images = oci.pagination.list_call_get_all_results(
-            compute_client.list_images,
-            compartment_id=image_compartment_id,
-            sort_by="TIMECREATED",
-            sort_order="DESC",
-        ).data
-    except Exception as e:
-        console.print(
-            f"[red]Failed to list images in compartment {image_compartment_id}: {e}[/red]"
-        )
-        return None
 
-    for img in images:
-        if not getattr(img, "defined_tags", None):
-            continue
-        img_type = _get_image_type(img, verbose=False)
-        release = _safe_get_defined_tag(img, "ics_images", "release", verbose=False)
-        if img_type == target_type and release and release.upper() == "LATEST":
-            return img
-    return None
+    Note: This function is kept for compatibility but the parallelized version
+    uses _build_latest_images_cache for better performance.
+    """
+    images = _fetch_all_images_in_compartment(compute_client, image_compartment_id)
+    cache = _build_latest_images_cache(images)
+    return cache.get(target_type)
 
 
 def _collect_instances_with_images(
@@ -272,8 +298,14 @@ def _collect_instances_with_images(
 ) -> List[Tuple[str, str, str, str, str]]:
     """
     For a given region and compartment, return a list of tuples:
-      (hostname, compartment_id, current_image_name, newer_image_name or '—')
+      (hostname, region, compartment_id, current_image_name, newer_image_name or '—')
     Lists ALL running instances and attempts to find a newer image for each.
+
+    This function is optimized for performance:
+    1. Fetches all instances in one API call
+    2. Fetches all unique image details in parallel
+    3. Fetches image lists once per unique image compartment (not per instance)
+    4. Builds caches to avoid redundant API calls
     """
     try:
         client = _build_client_for_region(project, stage, region)
@@ -281,13 +313,14 @@ def _collect_instances_with_images(
         console.print(f"[red]Failed to initialize OCI client for {region}: {e}[/red]")
         return []
 
-    # Access underlying SDK clients from the wrapper, mirroring ssh-sync behavior
+    # Access underlying SDK clients from the wrapper
     compute_client = getattr(client, "compute_client", None)
     network_client = getattr(client, "network_client", None)
     if compute_client is None or network_client is None:
         console.print("[red]OCIClient does not expose compute_client/network_client[/red]")
         return []
 
+    # Step 1: List all instances (single API call)
     try:
         instances = oci.pagination.list_call_get_all_results(
             compute_client.list_instances,
@@ -302,38 +335,88 @@ def _collect_instances_with_images(
         console.print(
             f"[yellow]No RUNNING instances found in region {region}, compartment {compartment_id}[/yellow]"
         )
+        return []
 
+    console.print(f"[dim]Found {len(instances)} instances in {region}, fetching image details...[/dim]")
+
+    # Step 2: Collect unique image IDs and fetch them in parallel
+    unique_image_ids = set()
+    for inst in instances:
+        image_id = getattr(inst, "image_id", None)
+        if image_id:
+            unique_image_ids.add(image_id)
+
+    # Fetch all unique images in parallel
+    def fetch_image(image_id: str):
+        try:
+            return compute_client.get_image(image_id).data
+        except Exception as e:
+            console.print(f"[yellow]Failed to fetch image '{image_id}': {e}[/yellow]")
+            return None
+
+    image_cache: dict = {}
+    if unique_image_ids:
+        image_results = run_parallel_map(
+            fetch_image,
+            list(unique_image_ids),
+            max_workers=DEFAULT_INSTANCE_WORKERS,
+        )
+        for image_id, image, error in image_results:
+            if image:
+                image_cache[image_id] = image
+
+    # Step 3: Collect unique image compartment IDs and fetch their image lists
+    unique_image_compartments = set()
+    for image in image_cache.values():
+        img_compartment = getattr(image, "compartment_id", None)
+        if img_compartment:
+            unique_image_compartments.add(img_compartment)
+
+    # Fetch image lists for each unique compartment in parallel
+    def fetch_compartment_images(comp_id: str):
+        return _fetch_all_images_in_compartment(compute_client, comp_id)
+
+    latest_images_cache: dict = {}  # compartment_id -> {image_type -> latest_image}
+    if unique_image_compartments:
+        compartment_results = run_parallel_map(
+            fetch_compartment_images,
+            list(unique_image_compartments),
+            max_workers=DEFAULT_INSTANCE_WORKERS,
+        )
+        for comp_id, images, error in compartment_results:
+            if images:
+                latest_images_cache[comp_id] = _build_latest_images_cache(images)
+
+    # Step 4: Process each instance using the cached data
     results: List[Tuple[str, str, str, str, str]] = []
 
     for inst in instances:
         hostname = _get_primary_hostname_for_instance(compute_client, network_client, inst)
         instance_name = getattr(inst, "display_name", None) or inst.id
 
-        # Defaults if we cannot determine image info
+        # Defaults
         current_image_name = MISSING
         newer_image_name = MISSING
 
-        # Fetch current image details
         image_id = getattr(inst, "image_id", None)
-        image = None
         if not image_id:
             console.print(
                 f"[yellow]Instance '{instance_name}' ({hostname}) has no image_id; skipping newer-image check[/yellow]"
             )
-        else:
-            try:
-                image = compute_client.get_image(image_id).data
-                current_image_name = getattr(image, "display_name", "") or image_id
-            except Exception as e:
-                current_image_name = image_id
-                console.print(
-                    f"[yellow]Instance '{instance_name}' ({hostname}): failed to fetch image '{image_id}': {e}[/yellow]"
-                )
+            results.append((hostname, region, inst.compartment_id, current_image_name, newer_image_name))
+            continue
 
-        # If we have image info, try to find newer
+        # Get image from cache
+        image = image_cache.get(image_id)
+        if image:
+            current_image_name = getattr(image, "display_name", "") or image_id
+        else:
+            current_image_name = image_id
+
+        # Try to find newer image using cached data
         if image:
             image_compartment_id = getattr(image, "compartment_id", None)
-            image_type = _get_image_type(image, verbose=True)
+            image_type = _get_image_type(image, verbose=False)
 
             missing_bits = []
             if not image_compartment_id:
@@ -345,27 +428,22 @@ def _collect_instances_with_images(
                 console.print(
                     f"[yellow]Instance '{instance_name}' ({hostname}): cannot search for LATEST image; missing {', '.join(missing_bits)}[/yellow]"
                 )
-                console.print(
-                    f"[dim]Image '{getattr(image, 'display_name', getattr(image, 'id', '<unknown>'))}' defined_tags: {_format_defined_tags(getattr(image, 'defined_tags', {}))}[/dim]"
-                )
             else:
-                latest_image = _find_latest_image_with_same_type(
-                    compute_client,
-                    image_compartment_id=image_compartment_id,
-                    target_type=image_type,
-                )
+                # Look up latest image from cache
+                compartment_cache = latest_images_cache.get(image_compartment_id, {})
+                latest_image = compartment_cache.get(image_type)
+
                 if not latest_image:
                     console.print(
-                        f"[dim]Instance '{instance_name}' ({hostname}): no LATEST image found for type '{image_type}' in image compartment '{image_compartment_id}'[/dim]"
+                        f"[dim]Instance '{instance_name}' ({hostname}): no LATEST image found for type '{image_type}'[/dim]"
                     )
                 else:
-                    # compute candidate name
                     candidate_name = getattr(latest_image, "display_name", "") or getattr(
                         latest_image, "id", ""
                     )
                     if not candidate_name:
                         console.print(
-                            f"[dim]Instance '{instance_name}' ({hostname}): LATEST image found but has no display_name or id; cannot compare[/dim]"
+                            f"[dim]Instance '{instance_name}' ({hostname}): LATEST image found but has no display_name[/dim]"
                         )
                     elif candidate_name == current_image_name:
                         console.print(
@@ -377,9 +455,7 @@ def _collect_instances_with_images(
                             f"[green]Instance '{instance_name}' ({hostname}): newer image available -> '{newer_image_name}' (current '{current_image_name}')[/green]"
                         )
 
-        results.append(
-            (hostname, region, inst.compartment_id, current_image_name, newer_image_name)
-        )
+        results.append((hostname, region, inst.compartment_id, current_image_name, newer_image_name))
 
     return results
 
