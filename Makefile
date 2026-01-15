@@ -1,6 +1,6 @@
-# Makefile for OCI DevOps Plugin for OpenCode
-# An OpenCode CLI plugin for AI-assisted Oracle Cloud Infrastructure operations
-# Provides MCP server, skills, and CLI tools for OKE cluster management
+# Makefile for OCI DevOps Tools
+# CLI tools for AI-assisted Oracle Cloud Infrastructure operations
+# Provides skills and CLI tools for OKE cluster management
 
 CMD_COLOR=\033[1;36m
 DESC_COLOR=\033[0;37m
@@ -8,14 +8,11 @@ TITLE_COLOR=\033[1;33m
 RESET=\033[0m
 POLL_SECONDS ?= 30
 
-.PHONY: help install test ssh-sync clean format lint type-check dev-setup ssh-help test-coverage check setup-example quickstart image-updates oke-node-pool-bump oke-node-cycle delete-bucket delete-oke-cluster oke-version-report oke-upgrade oke-upgrade-node-pools mcp-server mcp-install mcp-config
+.PHONY: help install test ssh-sync clean format lint type-check dev-setup ssh-help test-coverage check setup-example quickstart image-updates oke-node-pool-bump oke-node-cycle delete-bucket delete-oke-cluster oke-version-report oke-upgrade oke-upgrade-node-pools
 
 # Default target
 help:
-	@printf "$(TITLE_COLOR)🚀 OCI DevOps Plugin for OpenCode - Available Commands$(RESET)\n\n"
-	@printf "$(TITLE_COLOR)MCP Server Commands:$(RESET)\n"
-	@printf "  $(CMD_COLOR)mcp-server$(RESET)    $(DESC_COLOR)Run the OKE Operations MCP server$(RESET)\n"
-	@printf "  $(CMD_COLOR)mcp-install$(RESET)   $(DESC_COLOR)Install MCP server with dependencies$(RESET)\n\n"
+	@printf "$(TITLE_COLOR)OCI DevOps Tools - Available Commands$(RESET)\n\n"
 	@printf "$(TITLE_COLOR)Setup Commands:$(RESET)\n"
 	@printf "  $(CMD_COLOR)install$(RESET)       $(DESC_COLOR)Install dependencies using Poetry$(RESET)\n"
 	@printf "  $(CMD_COLOR)dev-setup$(RESET)     $(DESC_COLOR)Complete development setup (install + pre-commit hooks)$(RESET)\n\n"
@@ -39,13 +36,11 @@ help:
 	@printf "  $(CMD_COLOR)type-check$(RESET)    $(DESC_COLOR)Run type checking with mypy$(RESET)\n"
 	@printf "  $(CMD_COLOR)check$(RESET)         $(DESC_COLOR)Run all quality checks$(RESET)\n"
 	@printf "  $(CMD_COLOR)clean$(RESET)         $(DESC_COLOR)Clean up temporary files and caches$(RESET)\n\n"
-	@printf "$(TITLE_COLOR)Quick Start - MCP Server:$(RESET)\n"
+	@printf "$(TITLE_COLOR)Quick Start:$(RESET)\n"
 	@printf "  $(DESC_COLOR)1. make install$(RESET)\n"
 	@printf "  $(DESC_COLOR)2. Configure tools/meta.yaml with your OCI compartments$(RESET)\n"
-	@printf "  $(DESC_COLOR)3. make mcp-server$(RESET)\n\n"
-	@printf "$(TITLE_COLOR)Quick Start - CLI:$(RESET)\n"
-	@printf "  $(DESC_COLOR)make oke-version-report PROJECT=my-project STAGE=dev$(RESET)\n"
-	@printf "  $(DESC_COLOR)make oke-upgrade REPORT=reports/oke_versions_my-project_dev.html$(RESET)\n"
+	@printf "  $(DESC_COLOR)3. make oke-version-report PROJECT=my-project STAGE=dev$(RESET)\n"
+	@printf "  $(DESC_COLOR)4. make oke-upgrade REPORT=reports/oke_versions_my-project_dev.html$(RESET)\n"
 
 # Installation and setup
 install:
@@ -56,46 +51,6 @@ dev-setup: install
 	@echo "🛠️  Setting up development environment..."
 	cd tools && poetry run pre-commit install
 	@echo "✅ Development environment ready!"
-
-# MCP Server commands
-mcp-server:
-	@echo "🚀 Starting OKE Operations MCP Server..."
-	@echo "The server will listen for MCP protocol messages on stdio."
-	@echo "Connect using Claude Desktop or another MCP client."
-	@echo ""
-	cd tools && poetry run python src/mcp_server.py
-
-mcp-install: install
-	@echo "✅ MCP server installed successfully!"
-	@echo ""
-	@echo "To run the MCP server:"
-	@echo "  make mcp-server"
-	@echo ""
-	@echo "To configure Claude Desktop, add to ~/.config/claude/claude_desktop_config.json:"
-	@echo '  {'
-	@echo '    "mcpServers": {'
-	@echo '      "oke-operations": {'
-	@echo '        "command": "poetry",'
-	@echo '        "args": ["run", "python", "src/mcp_server.py"],'
-	@echo '        "cwd": "$(shell pwd)/tools"'
-	@echo '      }'
-	@echo '    }'
-	@echo '  }'
-
-mcp-config:
-	@echo "📋 Claude Desktop Configuration:"
-	@echo ""
-	@echo "Add the following to ~/.config/claude/claude_desktop_config.json:"
-	@echo ""
-	@echo '{'
-	@echo '  "mcpServers": {'
-	@echo '    "oke-operations": {'
-	@echo '      "command": "poetry",'
-	@echo '      "args": ["run", "python", "src/mcp_server.py"],'
-	@echo '      "cwd": "$(shell pwd)/tools"'
-	@echo '    }'
-	@echo '  }'
-	@echo '}'
 
 # SSH Sync commands
 ssh-sync:

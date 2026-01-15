@@ -1,66 +1,46 @@
-# OCI DevOps Plugin for OpenCode
+# OCI DevOps Tools
 
-**An OpenCode CLI plugin enabling AI-assisted Oracle Cloud Infrastructure operations**
+**CLI tools and Skills for AI-assisted Oracle Cloud Infrastructure operations**
 
-This plugin extends [OpenCode CLI](https://opencode.ai) with specialized tools, skills, and agent instructions for performing DevOps tasks on Oracle Cloud Infrastructure (OCI), with a focus on Oracle Kubernetes Engine (OKE) operations.
+This project provides Skills and CLI tools for performing DevOps tasks on Oracle Cloud Infrastructure (OCI), with a focus on Oracle Kubernetes Engine (OKE) operations. Skills describe how to invoke CLI tools with proper parameters and interpret their outputs.
 
-## What This Plugin Provides
+## What This Project Provides
 
 | Component | Description |
 |-----------|-------------|
-| **MCP Server** | Model Context Protocol server providing OCI/OKE operational tools |
-| **Skills** | Guided workflows for complex multi-step OKE operations |
+| **Skills** | Guided workflows that invoke CLI tools for OCI operations |
+| **CLI Tools** | Makefile targets for OKE and infrastructure management |
 | **AGENTS.md** | Repository-specific instructions and safety guidelines |
 
 ## Key Features
 
-- **Cluster Version Management**: List clusters and check available Kubernetes upgrades
+- **Cluster Version Management**: Generate reports of all clusters and available Kubernetes upgrades
 - **Control Plane Upgrades**: Upgrade OKE cluster control planes to latest versions
 - **Node Pool Management**: Upgrade node pool configurations and cycle workers
-- **Image Updates**: Cycle node pools to apply new node images
-- **Node-Level Observability**: List individual nodes, check health states, and detect image updates
-- **DevOps Deployment Monitoring**: List DevOps projects, pipelines, and check deployment status with detailed logs
+- **Image Updates**: Check for and apply new node images via node pool cycling
+- **SSH Configuration**: Generate SSH configs for OCI instances with bastion access
+- **Resource Management**: Delete buckets and clusters when needed
 - **Safety Controls**: Built-in dry-run support and approval checkpoints for mutating operations
 
 ---
 
 ## Installation Guide
 
-### Step 1: Install OpenCode CLI
+### Step 1: Install OpenCode CLI (Optional)
 
-Choose one of the following installation methods:
+If using with OpenCode CLI for AI-assisted workflows:
 
-#### Quick Install (Recommended)
 ```bash
 curl -fsSL https://opencode.ai/install | bash
 ```
 
-#### Package Managers
+### Step 2: Configure an AI Provider (Optional)
 
-| Platform | Command |
-|----------|---------|
-| **npm** | `npm i -g opencode-ai@latest` |
-| **Homebrew** | `brew install opencode` |
-| **Go** | `go install github.com/opencode-ai/opencode@latest` |
-| **Arch Linux** | `paru -S opencode-bin` |
-| **Windows (Scoop)** | `scoop bucket add extras && scoop install extras/opencode` |
-| **Windows (Chocolatey)** | `choco install opencode` |
-| **Nix** | `nix run nixpkgs#opencode` |
-
-### Step 2: Configure an AI Provider
-
-OpenCode requires an AI provider. Set one of the following environment variables:
+For AI-assisted usage:
 
 ```bash
 # Claude (Anthropic) - Recommended
 export ANTHROPIC_API_KEY="your-key"
-
-# Or use OpenCode Zen (run /connect in OpenCode TUI)
-# Or OpenAI
-export OPENAI_API_KEY="your-key"
-
-# Or Google Gemini
-export GEMINI_API_KEY="your-key"
 ```
 
 ### Step 3: Clone This Repository
@@ -103,178 +83,122 @@ projects:
         tenancy-name: "my-staging-tenancy"
         us-ashburn-1:
           compartment_id: ocid1.compartment.oc1..aaaaaaaasrzpupgd...
-    prod:
-      oc17:
-        tenancy-ocid: ocid1.tenancy.oc17..aaaaaaaasaow4j73...
-        tenancy-name: "my-prod-tenancy"
-        us-dcc-phoenix-1:
-          compartment_id: ocid1.compartment.oc17..aaaaaaaasaow4j73...
 ```
 
-Each realm contains exactly one tenancy, and each tenancy can have multiple compartments across multiple regions.
+### Step 7: Install Skills (For AI-Assisted Usage)
 
-### Step 7: Add MCP Server to OpenCode
-
-Add the MCP server configuration to your OpenCode config file.
-
-**Location**: `~/.config/opencode/opencode.json` (global) or `opencode.json` (project-local)
-
-```json
-{
-  "$schema": "https://opencode.ai/config.json",
-  "mcp": {
-    "oci-devops": {
-      "type": "local",
-      "command": [
-        "poetry",
-        "--directory", "/path/to/oci-devops-agent/tools",
-        "run",
-        "python",
-        "src/mcp_server.py"
-      ]
-    }
-  }
-}
-```
-
-### Step 8: Install Skills
-
-OpenCode skills provide guided workflows for complex operations. This repository includes two skills in `.opencode/skills/`.
-
-#### Option A: Use This Repository Directly
-
-When you run OpenCode from within this repository, skills are automatically discovered from `.opencode/skills/`.
+Skills are automatically discovered from `.opencode/skills/` when running OpenCode from this repository.
 
 ```bash
 cd oci-devops-agent
 opencode
 ```
 
-#### Option B: Copy Skills to Global Location
-
-Copy skills to your global OpenCode config for use in any project:
+Or copy skills to global location:
 
 ```bash
-# Create global skills directory
 mkdir -p ~/.config/opencode/skill
-
-# Copy skills
-cp -r .opencode/skills/oke-cluster-upgrade ~/.config/opencode/skill/
-cp -r .opencode/skills/oke-node-upgrade ~/.config/opencode/skill/
-```
-
-### Step 9: Add AGENTS.md Instructions
-
-The `AGENTS.md` file provides repository guidelines and safety instructions to the AI agent.
-
-#### Option A: Use This Repository Directly
-
-The `AGENTS.md` at the root of this repository is automatically loaded when running OpenCode here.
-
-#### Option B: Copy to Your Project
-
-Copy `AGENTS.md` to your project root or merge its contents with your existing `AGENTS.md`:
-
-```bash
-cp AGENTS.md /path/to/your-project/
-```
-
-#### Option C: Add to Global Config
-
-For global instructions across all projects:
-
-```bash
-cp AGENTS.md ~/.config/opencode/AGENTS.md
+cp -r .opencode/skills/* ~/.config/opencode/skill/
 ```
 
 ---
 
 ## Available Skills
 
+### OKE Operations
+
 | Skill | Description | Invoke With |
 |-------|-------------|-------------|
-| `oke-cluster-upgrade` | Full Kubernetes version upgrade: control-plane, node pool configs, and worker rollout | "Use the oke-cluster-upgrade skill to upgrade..." |
-| `oke-node-upgrade` | Node image update workflow: apply security patches, OS updates via node cycling | "Use the oke-node-upgrade skill to cycle..." |
+| `oke-version-report` | Generate HTML report of cluster versions | "Generate a version report for my-project dev" |
+| `oke-upgrade` | Upgrade cluster control planes | "Upgrade the OKE clusters" |
+| `oke-upgrade-node-pools` | Upgrade node pool configurations | "Upgrade the node pools" |
+| `oke-node-cycle` | Cycle workers to apply new images | "Cycle the node pools" |
+| `oke-node-pool-bump` | Update node images from CSV report | "Apply image updates from CSV" |
+| `oke-cluster-upgrade` | Full K8s version upgrade workflow | "Use the oke-cluster-upgrade skill" |
+| `oke-node-upgrade` | Node image update workflow | "Use the oke-node-upgrade skill" |
 
-### How Skills + MCP Work Together
+### SSH & Infrastructure
+
+| Skill | Description | Invoke With |
+|-------|-------------|-------------|
+| `ssh-sync` | Generate SSH config for instances | "Generate SSH config for dev" |
+| `ssh-help` | Show SSH configuration help | "Show SSH help" |
+| `image-updates` | Check for available image updates | "Check for image updates" |
+
+### Resource Management
+
+| Skill | Description | Invoke With |
+|-------|-------------|-------------|
+| `delete-bucket` | Delete an OCI bucket | "Delete the bucket" |
+| `delete-oke-cluster` | Delete an OKE cluster | "Delete the cluster" |
+
+---
+
+## How Skills + CLI Tools Work Together
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │                         OpenCode                                │
 ├─────────────────────────────────────────────────────────────────┤
 │  ┌─────────────────┐    ┌─────────────────────────────────────┐ │
-│  │     Skills      │    │           MCP Server                │ │
-│  │  (Procedures)   │    │           (Tools)                   │ │
+│  │     Skills      │    │          CLI Tools (Makefile)       │ │
+│  │  (Procedures)   │    │                                     │ │
 │  ├─────────────────┤    ├─────────────────────────────────────┤ │
-│  │ oke-cluster-    │───▶│ list_oke_clusters                   │ │
-│  │ upgrade         │    │ get_oke_cluster_details             │ │
-│  │                 │    │ upgrade_oke_cluster                 │ │
-│  │ Guides AI       │    │ upgrade_node_pool                   │ │
-│  │ through the     │    │ cycle_node_pool                     │ │
-│  │ correct order   │    │ list_cluster_nodes                  │ │
-│  │ of operations   │    │ get_node_pool_details               │ │
+│  │ oke-version-    │───▶│ make oke-version-report             │ │
+│  │ report          │    │                                     │ │
 │  ├─────────────────┤    ├─────────────────────────────────────┤ │
-│  │ oke-node-       │───▶│ list_node_pools                     │ │
-│  │ upgrade         │    │ check_node_image_updates            │ │
-│  │                 │    │ cycle_node_pool                     │ │
-│  │ Guides AI       │    │ get_oke_version_report              │ │
-│  │ through node    │    ├─────────────────────────────────────┤ │
-│  │ image updates   │    │ DevOps Tools:                       │ │
-│  │                 │    │ list_devops_projects                │ │
-│  │                 │    │ list_deployment_pipelines           │ │
-│  │                 │    │ get_recent_deployment               │ │
-│  │                 │    │ get_deployment_logs                 │ │
+│  │ oke-upgrade     │───▶│ make oke-upgrade                    │ │
+│  ├─────────────────┤    ├─────────────────────────────────────┤ │
+│  │ oke-node-cycle  │───▶│ make oke-node-cycle                 │ │
+│  ├─────────────────┤    ├─────────────────────────────────────┤ │
+│  │ image-updates   │───▶│ make image-updates                  │ │
 │  └─────────────────┘    └─────────────────────────────────────┘ │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
 **Skills** define the procedural workflow (what to do, in what order, with what checks).
-**MCP Tools** provide the actual capabilities (API calls to OCI).
+**CLI Tools** provide the actual capabilities (run commands, produce output files).
 
 ---
 
-## MCP Tools Reference
+## CLI Tools Reference
 
-### Read-Only Operations
+### OKE Operations
 
-| Tool | Description | Parameters |
-|------|-------------|------------|
-| `list_oke_clusters` | List all OKE clusters | `project`, `stage`, `region` |
-| `get_oke_cluster_details` | Get detailed cluster info | `project`, `stage`, `region`, `cluster_id` |
-| `list_node_pools` | List node pools for a cluster | `project`, `stage`, `region`, `cluster_id` |
-| `get_oke_version_report` | Generate version report | `project`, `stage` |
-| `list_cluster_nodes` | List all worker nodes for a cluster | `project`, `stage`, `region`, `cluster_id` |
-| `get_node_pool_details` | Get detailed node pool info including nodes | `project`, `stage`, `region`, `node_pool_id` |
-| `check_node_image_updates` | Check which nodes have newer OS images | `project`, `stage`, `region`, `cluster_id` (optional) |
+| Command | Description | Output |
+|---------|-------------|--------|
+| `make oke-version-report PROJECT=x STAGE=y` | Generate cluster version report | HTML file |
+| `make oke-upgrade REPORT=path [DRY_RUN=true]` | Upgrade cluster control planes | Console |
+| `make oke-upgrade-node-pools REPORT=path` | Upgrade node pool configs | Console |
+| `make oke-node-cycle REPORT=path` | Cycle node pools | Console |
+| `make oke-node-pool-bump CSV=path` | Bump images from CSV | Console |
 
-### DevOps Operations
+### SSH & Infrastructure
 
-| Tool | Description | Parameters |
-|------|-------------|------------|
-| `list_devops_projects` | List all DevOps projects in a compartment | `project`, `stage`, `region` |
-| `list_deployment_pipelines` | List deployment pipelines | `project`, `stage`, `region`, `devops_project_id` (optional) |
-| `get_recent_deployment` | Get most recent deployment status | `project`, `stage`, `region`, `pipeline_id`, `limit` |
-| `get_deployment_logs` | Get detailed stage-by-stage deployment logs | `project`, `stage`, `region`, `deployment_id` |
+| Command | Description | Output |
+|---------|-------------|--------|
+| `make ssh-sync PROJECT=x STAGE=y` | Generate SSH config | SSH config file |
+| `make ssh-help` | Show SSH configuration help | Console |
+| `make image-updates PROJECT=x STAGE=y` | Check for image updates | CSV + Console |
 
-### Mutating Operations (Require User Approval)
+### Resource Management
 
-| Tool | Description | Parameters |
-|------|-------------|------------|
-| `upgrade_oke_cluster` | Upgrade control plane | `project`, `stage`, `region`, `cluster_id`, `target_version`, `dry_run` |
-| `upgrade_node_pool` | Upgrade node pool config | `project`, `stage`, `region`, `node_pool_id`, `target_version`, `dry_run` |
-| `cycle_node_pool` | Replace worker nodes | `project`, `stage`, `region`, `node_pool_id`, `maximum_unavailable`, `dry_run` |
+| Command | Description | Output |
+|---------|-------------|--------|
+| `make delete-bucket PROJECT=x STAGE=y REGION=r BUCKET=b` | Delete bucket | Console |
+| `make delete-oke-cluster PROJECT=x STAGE=y REGION=r CLUSTER_ID=id` | Delete cluster | Console |
 
 ---
 
 ## Usage Examples
 
-### Using Skills (Recommended)
+### Using Skills (AI-Assisted)
 
 Skills provide guided, step-by-step workflows with safety checkpoints.
 
 **Upgrade Kubernetes version:**
 ```
-Use the oke-cluster-upgrade skill to upgrade the OKE cluster in my-project dev us-phoenix-1
+Use the oke-cluster-upgrade skill to upgrade the OKE cluster in my-project dev
 ```
 
 **Apply node image updates:**
@@ -282,18 +206,30 @@ Use the oke-cluster-upgrade skill to upgrade the OKE cluster in my-project dev u
 Use the oke-node-upgrade skill to cycle all node pools in the staging cluster
 ```
 
-### Direct Tool Usage
-
-For simple operations, you can use MCP tools directly.
-
-**List clusters:**
+**Check cluster versions:**
 ```
-List all OKE clusters in my-project dev us-phoenix-1
+Use the oke-version-report skill to check what clusters we have in my-project dev
 ```
 
-**Check upgrade availability:**
-```
-Get details for cluster X and show me available upgrades
+### Direct CLI Usage
+
+For direct command-line usage without AI assistance:
+
+```bash
+# Generate version report
+make oke-version-report PROJECT=my-project STAGE=dev
+
+# Preview upgrade (dry-run)
+make oke-upgrade REPORT=reports/oke_versions_my-project_dev.html DRY_RUN=true
+
+# Execute upgrade
+make oke-upgrade REPORT=reports/oke_versions_my-project_dev.html
+
+# Check for image updates
+make image-updates PROJECT=my-project STAGE=dev
+
+# Generate SSH config
+make ssh-sync PROJECT=my-project STAGE=dev
 ```
 
 ---
@@ -304,15 +240,15 @@ Get details for cluster X and show me available upgrades
 
 **CRITICAL: Mutating operations require explicit user approval.**
 
-| Operation Type | Tools | Approval Required |
-|---------------|-------|-------------------|
-| Read-only (OKE) | `list_oke_clusters`, `get_oke_cluster_details`, `list_node_pools`, `get_oke_version_report`, `list_cluster_nodes`, `get_node_pool_details`, `check_node_image_updates` | No |
-| Read-only (DevOps) | `list_devops_projects`, `list_deployment_pipelines`, `get_recent_deployment`, `get_deployment_logs` | No |
-| **Mutating** | `upgrade_oke_cluster`, `upgrade_node_pool`, `cycle_node_pool` | **YES** |
+| Operation Type | CLI Commands | Approval Required |
+|---------------|--------------|-------------------|
+| Read-only | `oke-version-report`, `image-updates`, `ssh-sync` | No |
+| **Mutating** | `oke-upgrade`, `oke-upgrade-node-pools`, `oke-node-cycle`, `oke-node-pool-bump` | **YES** |
+| **Destructive** | `delete-bucket`, `delete-oke-cluster` | **YES - Extra confirmation** |
 
 ### Approval Workflow
 
-1. **Dry-run first**: Use `dry_run=true` to preview changes
+1. **Dry-run first**: Use `DRY_RUN=true` to preview changes
 2. **Review the plan**: AI presents what will be modified
 3. **Explicit approval**: AI waits for your "yes" before proceeding
 4. **Per-operation approval**: Each mutating operation requires separate confirmation
@@ -325,13 +261,20 @@ Get details for cluster X and show me available upgrades
 oci-devops-agent/
 ├── .opencode/
 │   └── skills/                    # OpenCode Skills
-│       ├── oke-cluster-upgrade/
-│       │   └── SKILL.md           # K8s version upgrade procedure
-│       └── oke-node-upgrade/
-│           └── SKILL.md           # Node image update procedure
+│       ├── oke-version-report/
+│       ├── oke-upgrade/
+│       ├── oke-upgrade-node-pools/
+│       ├── oke-node-cycle/
+│       ├── oke-node-pool-bump/
+│       ├── oke-cluster-upgrade/   # Composite workflow
+│       ├── oke-node-upgrade/      # Composite workflow
+│       ├── ssh-sync/
+│       ├── ssh-help/
+│       ├── image-updates/
+│       ├── delete-bucket/
+│       └── delete-oke-cluster/
 ├── tools/
 │   ├── src/
-│   │   ├── mcp_server.py          # MCP server implementation
 │   │   ├── oci_client/            # OCI client library
 │   │   │   ├── client.py          # Main OCI client
 │   │   │   ├── models.py          # Data models
@@ -340,33 +283,17 @@ oci-devops-agent/
 │   │   ├── oke_upgrade.py         # Cluster upgrade CLI
 │   │   ├── oke_node_pool_upgrade.py  # Node pool upgrade CLI
 │   │   ├── oke_node_cycle.py      # Node cycling CLI
-│   │   └── oke_version_report.py  # Version report generator
+│   │   ├── oke_version_report.py  # Version report generator
+│   │   ├── check_image_updates.py # Image update checker
+│   │   ├── ssh_sync.py            # SSH config generator
+│   │   ├── node_cycle_pools.py    # CSV-driven node cycling
+│   │   └── delete_resources.py    # Resource deletion
 │   ├── tests/                     # Unit tests
 │   ├── meta.yaml                  # Configuration (gitignored)
 │   └── pyproject.toml             # Dependencies
 ├── AGENTS.md                      # Repository guidelines for AI
 ├── README.md                      # This file
-└── Makefile                       # Automation commands
-```
-
----
-
-## CLI Tools (Alternative Usage)
-
-In addition to the AI-assisted workflow, traditional CLI tools are available:
-
-```bash
-# Generate OKE version report
-make oke-version-report PROJECT=my-project STAGE=dev
-
-# Upgrade OKE cluster control plane
-make oke-upgrade REPORT=reports/oke_versions_my-project_dev.html
-
-# Upgrade node pools
-make oke-upgrade-node-pools REPORT=reports/oke_versions_my-project_dev.html
-
-# Cycle node pools
-make oke-node-cycle REPORT=reports/oke_versions_my-project_dev.html
+└── Makefile                       # CLI commands
 ```
 
 ---
@@ -394,14 +321,6 @@ make type-check # Run type checking
 make check     # Run all checks
 ```
 
-### Run MCP Server Locally
-
-```bash
-make mcp-server
-# Or directly:
-cd tools && poetry run python src/mcp_server.py
-```
-
 ---
 
 ## Troubleshooting
@@ -411,12 +330,6 @@ cd tools && poetry run python src/mcp_server.py
 - Ensure you're running OpenCode from within the repository, OR
 - Copy skills to `~/.config/opencode/skill/`
 - Check skill folder structure: `skill-name/SKILL.md`
-
-### MCP Server Not Connecting
-
-- Verify the `cwd` path in your OpenCode config is absolute
-- Ensure Poetry is installed and dependencies are available
-- Test manually: `cd tools && poetry run python src/mcp_server.py`
 
 ### Authentication Issues
 
@@ -436,12 +349,10 @@ oci session authenticate --profile-name DEFAULT --region us-phoenix-1
 ## Resources
 
 - [OpenCode Documentation](https://opencode.ai/docs/)
-- [OpenCode CLI Reference](https://opencode.ai/docs/cli/)
 - [OpenCode Skills Guide](https://opencode.ai/docs/skills/)
-- [OpenCode Configuration](https://opencode.ai/docs/config/)
 - [AGENTS.md Specification](https://agents.md/)
 - [OCI Documentation](https://docs.oracle.com/en-us/iaas/Content/ContEng/home.htm)
 
 ---
 
-**OCI DevOps Plugin for OpenCode** - Enabling AI-assisted Oracle Cloud Infrastructure operations
+**OCI DevOps Tools** - Enabling AI-assisted Oracle Cloud Infrastructure operations

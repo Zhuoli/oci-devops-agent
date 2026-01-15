@@ -1,7 +1,7 @@
 [tool.poetry]
-name = "oke-operations-mcp-server"
-version = "0.1.0"
-description = "An MCP server for Oracle Kubernetes Engine (OKE) operational tasks including cluster upgrades, node pool management, and image updates"
+name = "oci-devops-tools"
+version = "0.2.0"
+description = "CLI tools for Oracle Kubernetes Engine (OKE) operational tasks including cluster upgrades, node pool management, and image updates"
 authors = ["Your Name <your.email@example.com>"]
 readme = "../README.md"
 packages = [{include = "oci_client", from = "src"}]
@@ -14,7 +14,6 @@ pydantic = "^2.5.0"
 python-dotenv = "^1.0.0"
 rich = "^13.7.0"  # For better console output
 tenacity = "^8.2.3"  # For retry logic
-mcp = "^1.0.0"  # Model Context Protocol SDK
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^7.4.0"
