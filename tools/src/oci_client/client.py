@@ -942,6 +942,7 @@ class OCIClient:
                 shape=instance.shape,
                 availability_domain=instance.availability_domain,
                 fault_domain=instance.fault_domain,
+                lifecycle_state=instance.lifecycle_state,
                 metadata=all_metadata,
                 tags={**instance.freeform_tags, **instance.defined_tags},
             )

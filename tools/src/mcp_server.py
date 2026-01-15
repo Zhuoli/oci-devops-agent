@@ -17,6 +17,7 @@ Usage:
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import sys
@@ -24,7 +25,9 @@ import traceback
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import asdict
 from datetime import datetime, timezone
+from functools import lru_cache
 from pathlib import Path
+from threading import Lock
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 # Configure logging to file for debugging
@@ -65,6 +68,12 @@ except Exception as e:
 
 # Create MCP server instance
 server = Server("oke-operations")
+
+# Client cache to avoid repeated session setup overhead
+# Key: (project, stage, region, config_file), Value: (OCIClient, timestamp)
+_client_cache: Dict[Tuple[str, str, str, str], Tuple[OCIClient, float]] = {}
+_client_cache_lock = Lock()
+_CLIENT_CACHE_TTL = 300  # 5 minutes cache TTL
 
 
 def _serialize_cluster(cluster: OKEClusterInfo) -> Dict[str, Any]:
@@ -146,9 +155,28 @@ def _get_client(
     """
     Initialize an OCI client for the given project/stage/region.
 
+    Uses a cache to avoid repeated session setup overhead. Cache entries
+    expire after _CLIENT_CACHE_TTL seconds.
+
     Returns:
         Tuple of (client, error_message). If client is None, error_message describes the issue.
     """
+    import time
+
+    cache_key = (project, stage, region, config_file)
+    current_time = time.time()
+
+    # Check cache first (with lock to prevent race conditions)
+    with _client_cache_lock:
+        if cache_key in _client_cache:
+            cached_client, cached_time = _client_cache[cache_key]
+            if current_time - cached_time < _CLIENT_CACHE_TTL:
+                logger.info(f"[MCP_CLIENT] Using cached client for {project}/{stage}/{region}")
+                return cached_client, None
+            else:
+                logger.info(f"[MCP_CLIENT] Cache expired for {project}/{stage}/{region}")
+                del _client_cache[cache_key]
+
     try:
         logger.info(f"[MCP_CLIENT] Getting client for project={project}, stage={stage}, region={region}")
         profile_name = setup_session_token(project, stage, region, config_file=config_file)
@@ -158,6 +186,11 @@ def _get_client(
             logger.error(f"[MCP_CLIENT] Failed to create OCI client for region {region}")
             return None, f"Failed to initialize OCI client for region {region}"
         logger.info(f"[MCP_CLIENT] OCI client created successfully for region {region}")
+
+        # Cache the client
+        with _client_cache_lock:
+            _client_cache[cache_key] = (client, current_time)
+
         return client, None
     except Exception as e:
         logger.error(f"[MCP_CLIENT] Error initializing OCI client: {type(e).__name__}: {e}")
@@ -1476,6 +1509,238 @@ async def _get_node_pool_details(arguments: Dict[str, Any]) -> List[TextContent]
         return [TextContent(type="text", text=f"Error getting node pool details: {str(e)}")]
 
 
+def _check_single_node_image(
+    compute_client: Any,
+    node_info: Dict[str, Any],
+    image_cache: Dict[str, Any],
+    latest_image_cache: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Check a single node for image updates. Used for parallel processing."""
+    from oci.pagination import list_call_get_all_results_generator
+
+    node_result = {
+        "node_id": node_info["node_id"],
+        "node_name": node_info["node_name"],
+        "node_pool_name": node_info["node_pool_name"],
+        "cluster_name": node_info["cluster_name"],
+        "current_image_name": None,
+        "current_image_id": None,
+        "latest_image_name": None,
+        "latest_image_id": None,
+        "needs_update": False,
+        "status": "unknown",
+    }
+
+    try:
+        # Get instance details to find current image
+        instance = compute_client.get_instance(node_info["node_id"]).data
+        image_id = getattr(instance, "image_id", None) or node_info.get("pool_image_id")
+
+        if not image_id:
+            node_result["status"] = "no_image_id"
+            return node_result
+
+        node_result["current_image_id"] = image_id
+
+        # Get current image details (with caching)
+        try:
+            if image_id in image_cache:
+                current_image = image_cache[image_id]
+            else:
+                current_image = compute_client.get_image(image_id).data
+                image_cache[image_id] = current_image
+
+            node_result["current_image_name"] = getattr(
+                current_image, "display_name", image_id
+            )
+
+            # Try to find LATEST image of same type
+            image_compartment_id = getattr(current_image, "compartment_id", None)
+            defined_tags = getattr(current_image, "defined_tags", {}) or {}
+
+            # Check for image type in defined tags
+            image_type = None
+            for namespace in ["ics_images", "icm_images"]:
+                ns_tags = defined_tags.get(namespace, {})
+                if isinstance(ns_tags, dict) and "type" in ns_tags:
+                    image_type = ns_tags["type"]
+                    break
+
+            if not image_type or not image_compartment_id:
+                node_result["status"] = "no_image_type_tag"
+                return node_result
+
+            # Search for LATEST image with same type (with caching)
+            cache_key = f"{image_compartment_id}:{image_type}"
+            if cache_key in latest_image_cache:
+                latest_image = latest_image_cache[cache_key]
+            else:
+                # Use lazy generator to avoid fetching all images upfront
+                # This stops fetching pages as soon as we find the LATEST image
+                latest_image = None
+                for img in list_call_get_all_results_generator(
+                    compute_client.list_images,
+                    'record',  # yield individual image records
+                    compartment_id=image_compartment_id,
+                    sort_by="TIMECREATED",
+                    sort_order="DESC",
+                ):
+                    img_tags = getattr(img, "defined_tags", {}) or {}
+                    img_type = None
+                    release = None
+
+                    for namespace in ["ics_images", "icm_images"]:
+                        ns_tags = img_tags.get(namespace, {})
+                        if isinstance(ns_tags, dict):
+                            if "type" in ns_tags:
+                                img_type = ns_tags["type"]
+                            if "release" in ns_tags:
+                                release = ns_tags["release"]
+
+                    if img_type == image_type and release and release.upper() == "LATEST":
+                        latest_image = img
+                        break
+
+                latest_image_cache[cache_key] = latest_image
+
+            if latest_image:
+                latest_name = getattr(latest_image, "display_name", None)
+                latest_id = getattr(latest_image, "id", None)
+                node_result["latest_image_name"] = latest_name
+                node_result["latest_image_id"] = latest_id
+
+                if latest_id != image_id:
+                    node_result["needs_update"] = True
+                    node_result["status"] = "update_available"
+                else:
+                    node_result["status"] = "up_to_date"
+            else:
+                node_result["status"] = "no_latest_image_found"
+
+        except oci_exceptions.ServiceError as e:
+            node_result["status"] = f"image_lookup_error: {e.message}"
+
+    except oci_exceptions.ServiceError as e:
+        node_result["status"] = f"instance_lookup_error: {e.message}"
+
+    return node_result
+
+
+def _check_node_image_updates_sync(
+    client: OCIClient,
+    compartment_id: str,
+    project: str,
+    stage: str,
+    region: str,
+    cluster_id: Optional[str],
+) -> Dict[str, Any]:
+    """Synchronous helper for checking node image updates - runs blocking API calls."""
+    compute_client = client.compute_client
+    ce_client = client.container_engine_client
+
+    # Collect nodes to check
+    nodes_to_check = []
+
+    if cluster_id:
+        # Get nodes for specific cluster
+        cluster = client.get_oke_cluster(cluster_id)
+        node_pools = client.list_node_pools(cluster_id, compartment_id)
+
+        for np in node_pools:
+            try:
+                np_details = ce_client.get_node_pool(np.node_pool_id).data
+                node_source = getattr(np_details, "node_source", None)
+                pool_image_id = getattr(node_source, "image_id", None) if node_source else None
+
+                nodes = getattr(np_details, "nodes", []) or []
+                for node in nodes:
+                    node_id = getattr(node, "id", None)
+                    if node_id and getattr(node, "lifecycle_state", None) == "ACTIVE":
+                        nodes_to_check.append(
+                            {
+                                "node_id": node_id,
+                                "node_name": getattr(node, "name", node_id),
+                                "node_pool_id": np.node_pool_id,
+                                "node_pool_name": np.name,
+                                "pool_image_id": pool_image_id,
+                                "cluster_id": cluster_id,
+                                "cluster_name": cluster.name,
+                            }
+                        )
+            except Exception as e:
+                logger.warning(f"Failed to get nodes for node pool {np.node_pool_id}: {e}")
+    else:
+        # Get all running instances in compartment and detect OKE nodes
+        instances = client.list_oke_instances(compartment_id)
+        for inst in instances:
+            nodes_to_check.append(
+                {
+                    "node_id": inst.instance_id,
+                    "node_name": inst.display_name,
+                    "node_pool_id": None,
+                    "node_pool_name": None,
+                    "pool_image_id": None,
+                    "cluster_id": None,
+                    "cluster_name": inst.cluster_name,
+                }
+            )
+
+    # Shared caches for image lookups (thread-safe via GIL for dict operations)
+    image_cache: Dict[str, Any] = {}
+    latest_image_cache: Dict[str, Any] = {}
+
+    # Process nodes in parallel using ThreadPoolExecutor
+    results = []
+    max_workers = min(10, len(nodes_to_check)) if nodes_to_check else 1
+
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {
+            executor.submit(
+                _check_single_node_image,
+                compute_client,
+                node_info,
+                image_cache,
+                latest_image_cache,
+            ): node_info
+            for node_info in nodes_to_check
+        }
+
+        for future in as_completed(futures):
+            try:
+                result = future.result()
+                results.append(result)
+            except Exception as e:
+                node_info = futures[future]
+                results.append({
+                    "node_id": node_info["node_id"],
+                    "node_name": node_info["node_name"],
+                    "node_pool_name": node_info.get("node_pool_name"),
+                    "cluster_name": node_info.get("cluster_name"),
+                    "status": f"error: {str(e)}",
+                    "needs_update": False,
+                })
+
+    # Count results
+    nodes_needing_update = sum(1 for r in results if r.get("needs_update"))
+    nodes_up_to_date = sum(1 for r in results if r.get("status") == "up_to_date")
+    nodes_unknown = len(results) - nodes_needing_update - nodes_up_to_date
+
+    # Build summary
+    return {
+        "project": project,
+        "stage": stage,
+        "region": region,
+        "cluster_id": cluster_id,
+        "compartment_id": compartment_id,
+        "total_nodes_checked": len(results),
+        "nodes_needing_update": nodes_needing_update,
+        "nodes_up_to_date": nodes_up_to_date,
+        "nodes_unknown": nodes_unknown,
+        "nodes_with_updates": [r for r in results if r.get("needs_update")],
+        "all_nodes": results,
+    }
+
+
 async def _check_node_image_updates(arguments: Dict[str, Any]) -> List[TextContent]:
     """Check which nodes have newer OS images available."""
     project = arguments["project"]
@@ -1498,184 +1763,10 @@ async def _check_node_image_updates(arguments: Dict[str, Any]) -> List[TextConte
         ]
 
     try:
-        compute_client = client.compute_client
-        ce_client = client.container_engine_client
-
-        # Collect nodes to check
-        nodes_to_check = []
-
-        if cluster_id:
-            # Get nodes for specific cluster
-            cluster = client.get_oke_cluster(cluster_id)
-            node_pools = client.list_node_pools(cluster_id, compartment_id)
-
-            for np in node_pools:
-                try:
-                    np_details = ce_client.get_node_pool(np.node_pool_id).data
-                    node_source = getattr(np_details, "node_source", None)
-                    pool_image_id = getattr(node_source, "image_id", None) if node_source else None
-
-                    nodes = getattr(np_details, "nodes", []) or []
-                    for node in nodes:
-                        node_id = getattr(node, "id", None)
-                        if node_id and getattr(node, "lifecycle_state", None) == "ACTIVE":
-                            nodes_to_check.append(
-                                {
-                                    "node_id": node_id,
-                                    "node_name": getattr(node, "name", node_id),
-                                    "node_pool_id": np.node_pool_id,
-                                    "node_pool_name": np.name,
-                                    "pool_image_id": pool_image_id,
-                                    "cluster_id": cluster_id,
-                                    "cluster_name": cluster.name,
-                                }
-                            )
-                except Exception as e:
-                    logger.warning(f"Failed to get nodes for node pool {np.node_pool_id}: {e}")
-        else:
-            # Get all running instances in compartment and detect OKE nodes
-            instances = client.list_oke_instances(compartment_id)
-            for inst in instances:
-                nodes_to_check.append(
-                    {
-                        "node_id": inst.instance_id,
-                        "node_name": inst.display_name,
-                        "node_pool_id": None,
-                        "node_pool_name": None,
-                        "pool_image_id": None,
-                        "cluster_id": None,
-                        "cluster_name": inst.cluster_name,
-                    }
-                )
-
-        # Check each node for image updates
-        results = []
-        nodes_needing_update = 0
-        nodes_up_to_date = 0
-        nodes_unknown = 0
-
-        for node_info in nodes_to_check:
-            node_result = {
-                "node_id": node_info["node_id"],
-                "node_name": node_info["node_name"],
-                "node_pool_name": node_info["node_pool_name"],
-                "cluster_name": node_info["cluster_name"],
-                "current_image_name": None,
-                "current_image_id": None,
-                "latest_image_name": None,
-                "latest_image_id": None,
-                "needs_update": False,
-                "status": "unknown",
-            }
-
-            try:
-                # Get instance details to find current image
-                instance = compute_client.get_instance(node_info["node_id"]).data
-                image_id = getattr(instance, "image_id", None) or node_info.get("pool_image_id")
-
-                if not image_id:
-                    node_result["status"] = "no_image_id"
-                    nodes_unknown += 1
-                    results.append(node_result)
-                    continue
-
-                node_result["current_image_id"] = image_id
-
-                # Get current image details
-                try:
-                    current_image = compute_client.get_image(image_id).data
-                    node_result["current_image_name"] = getattr(
-                        current_image, "display_name", image_id
-                    )
-
-                    # Try to find LATEST image of same type
-                    image_compartment_id = getattr(current_image, "compartment_id", None)
-                    defined_tags = getattr(current_image, "defined_tags", {}) or {}
-
-                    # Check for image type in defined tags
-                    image_type = None
-                    for namespace in ["ics_images", "icm_images"]:
-                        ns_tags = defined_tags.get(namespace, {})
-                        if isinstance(ns_tags, dict) and "type" in ns_tags:
-                            image_type = ns_tags["type"]
-                            break
-
-                    if not image_type or not image_compartment_id:
-                        node_result["status"] = "no_image_type_tag"
-                        nodes_unknown += 1
-                        results.append(node_result)
-                        continue
-
-                    # Search for LATEST image with same type
-                    from oci.pagination import list_call_get_all_results
-
-                    images = list_call_get_all_results(
-                        compute_client.list_images,
-                        compartment_id=image_compartment_id,
-                        sort_by="TIMECREATED",
-                        sort_order="DESC",
-                    ).data
-
-                    latest_image = None
-                    for img in images:
-                        img_tags = getattr(img, "defined_tags", {}) or {}
-                        img_type = None
-                        release = None
-
-                        for namespace in ["ics_images", "icm_images"]:
-                            ns_tags = img_tags.get(namespace, {})
-                            if isinstance(ns_tags, dict):
-                                if "type" in ns_tags:
-                                    img_type = ns_tags["type"]
-                                if "release" in ns_tags:
-                                    release = ns_tags["release"]
-
-                        if img_type == image_type and release and release.upper() == "LATEST":
-                            latest_image = img
-                            break
-
-                    if latest_image:
-                        latest_name = getattr(latest_image, "display_name", None)
-                        latest_id = getattr(latest_image, "id", None)
-                        node_result["latest_image_name"] = latest_name
-                        node_result["latest_image_id"] = latest_id
-
-                        if latest_id != image_id:
-                            node_result["needs_update"] = True
-                            node_result["status"] = "update_available"
-                            nodes_needing_update += 1
-                        else:
-                            node_result["status"] = "up_to_date"
-                            nodes_up_to_date += 1
-                    else:
-                        node_result["status"] = "no_latest_image_found"
-                        nodes_unknown += 1
-
-                except oci_exceptions.ServiceError as e:
-                    node_result["status"] = f"image_lookup_error: {e.message}"
-                    nodes_unknown += 1
-
-            except oci_exceptions.ServiceError as e:
-                node_result["status"] = f"instance_lookup_error: {e.message}"
-                nodes_unknown += 1
-
-            results.append(node_result)
-
-        # Build summary
-        summary = {
-            "project": project,
-            "stage": stage,
-            "region": region,
-            "cluster_id": cluster_id,
-            "compartment_id": compartment_id,
-            "total_nodes_checked": len(results),
-            "nodes_needing_update": nodes_needing_update,
-            "nodes_up_to_date": nodes_up_to_date,
-            "nodes_unknown": nodes_unknown,
-            "nodes_with_updates": [r for r in results if r["needs_update"]],
-            "all_nodes": results,
-        }
-
+        # Run blocking OCI calls in a thread pool to avoid blocking the event loop
+        summary = await asyncio.to_thread(
+            _check_node_image_updates_sync, client, compartment_id, project, stage, region, cluster_id
+        )
         return [TextContent(type="text", text=json.dumps(summary, indent=2))]
 
     except Exception as e:
@@ -1877,6 +1968,97 @@ async def _get_deployment_logs(arguments: Dict[str, Any]) -> List[TextContent]:
 # ========== New Summary and Infrastructure Tools ==========
 
 
+def _get_oke_status_summary_sync(
+    client: OCIClient, compartment_id: str, project: str, stage: str, region: str
+) -> Dict[str, Any]:
+    """Synchronous helper for OKE status summary - runs blocking API calls."""
+    # Get all clusters
+    clusters = client.list_oke_clusters(compartment_id)
+
+    # Build summary for each cluster
+    cluster_summaries = []
+    total_nodes = 0
+    clusters_with_upgrades = 0
+    nodes_needing_updates = 0
+
+    for cluster in clusters:
+        cluster_summary: Dict[str, Any] = {
+            "name": cluster.name,
+            "cluster_id": cluster.cluster_id,
+            "kubernetes_version": cluster.kubernetes_version,
+            "lifecycle_state": cluster.lifecycle_state,
+            "available_upgrades": cluster.available_upgrades,
+            "has_upgrades": len(cluster.available_upgrades) > 0,
+        }
+
+        if cluster.available_upgrades:
+            clusters_with_upgrades += 1
+
+        # Get node pools for this cluster
+        try:
+            node_pools = client.list_node_pools(cluster.cluster_id)
+            pool_summaries = []
+            for pool in node_pools:
+                pool_summary = {
+                    "name": pool.name,
+                    "node_pool_id": pool.node_pool_id,
+                    "kubernetes_version": pool.kubernetes_version,
+                    "node_count": getattr(pool, "node_count", 0),
+                    "lifecycle_state": pool.lifecycle_state,
+                }
+                pool_summaries.append(pool_summary)
+                total_nodes += getattr(pool, "node_count", 0) or 0
+
+            cluster_summary["node_pools"] = pool_summaries
+            cluster_summary["node_pool_count"] = len(node_pools)
+        except Exception as e:
+            cluster_summary["node_pools_error"] = str(e)
+
+        cluster_summaries.append(cluster_summary)
+
+    # Check for image updates if we have clusters
+    image_update_info = None
+    if clusters:
+        try:
+            instances = client.list_oke_instances(compartment_id)
+            # Count nodes that might need updates (simplified check)
+            nodes_needing_updates = len([i for i in instances if getattr(i, "lifecycle_state", None) == "RUNNING"])
+            image_update_info = {
+                "total_oke_instances": len(instances),
+                "running_instances": nodes_needing_updates,
+                "note": "Use check_node_image_updates for detailed image version comparison",
+            }
+        except Exception:
+            image_update_info = {"error": "Could not check image updates"}
+
+    # Build recommendations
+    recommendations = []
+    if clusters_with_upgrades > 0:
+        recommendations.append(
+            f"{clusters_with_upgrades} cluster(s) have Kubernetes upgrades available"
+        )
+    if not clusters:
+        recommendations.append("No OKE clusters found in this compartment")
+
+    return {
+        "project": project,
+        "stage": stage,
+        "region": region,
+        "compartment_id": compartment_id,
+        "summary": {
+            "total_clusters": len(clusters),
+            "clusters_with_upgrades": clusters_with_upgrades,
+            "total_node_pools": sum(
+                len(c.get("node_pools", [])) for c in cluster_summaries
+            ),
+            "total_nodes": total_nodes,
+        },
+        "clusters": cluster_summaries,
+        "image_updates": image_update_info,
+        "recommendations": recommendations,
+    }
+
+
 async def _get_oke_status_summary(arguments: Dict[str, Any]) -> List[TextContent]:
     """Get comprehensive OKE status including clusters, versions, and image updates."""
     project = arguments["project"]
@@ -1898,95 +2080,92 @@ async def _get_oke_status_summary(arguments: Dict[str, Any]) -> List[TextContent
         ]
 
     try:
-        # Get all clusters
-        clusters = client.list_oke_clusters(compartment_id)
-
-        # Build summary for each cluster
-        cluster_summaries = []
-        total_nodes = 0
-        clusters_with_upgrades = 0
-        nodes_needing_updates = 0
-
-        for cluster in clusters:
-            cluster_summary = {
-                "name": cluster.name,
-                "cluster_id": cluster.cluster_id,
-                "kubernetes_version": cluster.kubernetes_version,
-                "lifecycle_state": cluster.lifecycle_state,
-                "available_upgrades": cluster.available_upgrades,
-                "has_upgrades": len(cluster.available_upgrades) > 0,
-            }
-
-            if cluster.available_upgrades:
-                clusters_with_upgrades += 1
-
-            # Get node pools for this cluster
-            try:
-                node_pools = client.list_node_pools(cluster.cluster_id)
-                pool_summaries = []
-                for pool in node_pools:
-                    pool_summary = {
-                        "name": pool.name,
-                        "node_pool_id": pool.node_pool_id,
-                        "kubernetes_version": pool.kubernetes_version,
-                        "node_count": pool.node_count,
-                        "lifecycle_state": pool.lifecycle_state,
-                    }
-                    pool_summaries.append(pool_summary)
-                    total_nodes += pool.node_count or 0
-
-                cluster_summary["node_pools"] = pool_summaries
-                cluster_summary["node_pool_count"] = len(node_pools)
-            except Exception as e:
-                cluster_summary["node_pools_error"] = str(e)
-
-            cluster_summaries.append(cluster_summary)
-
-        # Check for image updates if we have clusters
-        image_update_info = None
-        if clusters:
-            try:
-                instances = client.list_oke_instances(compartment_id)
-                # Count nodes that might need updates (simplified check)
-                nodes_needing_updates = len([i for i in instances if i.lifecycle_state == "RUNNING"])
-                image_update_info = {
-                    "total_oke_instances": len(instances),
-                    "running_instances": nodes_needing_updates,
-                    "note": "Use check_node_image_updates for detailed image version comparison",
-                }
-            except Exception:
-                image_update_info = {"error": "Could not check image updates"}
-
-        # Build recommendations
-        recommendations = []
-        if clusters_with_upgrades > 0:
-            recommendations.append(
-                f"{clusters_with_upgrades} cluster(s) have Kubernetes upgrades available"
-            )
-        if not clusters:
-            recommendations.append("No OKE clusters found in this compartment")
-
-        result = {
-            "project": project,
-            "stage": stage,
-            "region": region,
-            "compartment_id": compartment_id,
-            "summary": {
-                "total_clusters": len(clusters),
-                "clusters_with_upgrades": clusters_with_upgrades,
-                "total_node_pools": sum(
-                    len(c.get("node_pools", [])) for c in cluster_summaries
-                ),
-                "total_nodes": total_nodes,
-            },
-            "clusters": cluster_summaries,
-            "image_updates": image_update_info,
-            "recommendations": recommendations,
-        }
+        # Run blocking OCI calls in a thread pool to avoid blocking the event loop
+        result = await asyncio.to_thread(
+            _get_oke_status_summary_sync, client, compartment_id, project, stage, region
+        )
         return [TextContent(type="text", text=json.dumps(result, indent=2))]
 
     except Exception as e:
         return [TextContent(type="text", text=f"Error getting OKE status summary: {str(e)}")]
+
+
+def _get_oci_health_check_sync(
+    client: OCIClient, compartment_id: str, project: str, stage: str, region: str
+) -> Dict[str, Any]:
+    """Synchronous helper for OCI health check - runs blocking API calls."""
+    health_report = {
+        "project": project,
+        "stage": stage,
+        "region": region,
+        "compartment_id": compartment_id,
+        "services": {},
+        "issues": [],
+        "overall_status": "HEALTHY",
+    }
+
+    # Check OKE clusters
+    try:
+        clusters = client.list_oke_clusters(compartment_id)
+        unhealthy_clusters = [c for c in clusters if c.lifecycle_state != "ACTIVE"]
+        health_report["services"]["oke"] = {
+            "status": "HEALTHY" if not unhealthy_clusters else "DEGRADED",
+            "total_clusters": len(clusters),
+            "active_clusters": len(clusters) - len(unhealthy_clusters),
+            "unhealthy_clusters": [
+                {"name": c.name, "state": c.lifecycle_state} for c in unhealthy_clusters
+            ],
+        }
+        if unhealthy_clusters:
+            health_report["issues"].append(
+                f"OKE: {len(unhealthy_clusters)} cluster(s) not in ACTIVE state"
+            )
+            health_report["overall_status"] = "DEGRADED"
+    except Exception as e:
+        health_report["services"]["oke"] = {"status": "ERROR", "error": str(e)}
+        health_report["issues"].append(f"OKE: Failed to check - {str(e)}")
+
+    # Check Compute instances
+    try:
+        instances = client.list_instances(compartment_id)
+        running = [i for i in instances if i.lifecycle_state == "RUNNING"]
+        stopped = [i for i in instances if i.lifecycle_state == "STOPPED"]
+        other = [i for i in instances if i.lifecycle_state not in ["RUNNING", "STOPPED", "TERMINATED"]]
+        health_report["services"]["compute"] = {
+            "status": "HEALTHY" if not other else "WARNING",
+            "total_instances": len(instances),
+            "running": len(running),
+            "stopped": len(stopped),
+            "other_states": len(other),
+        }
+        if other:
+            health_report["issues"].append(
+                f"Compute: {len(other)} instance(s) in transitional states"
+            )
+    except Exception as e:
+        health_report["services"]["compute"] = {"status": "ERROR", "error": str(e)}
+
+    # Check DevOps projects
+    try:
+        devops_projects = client.list_devops_projects(compartment_id)
+        active_projects = [p for p in devops_projects if p.lifecycle_state == "ACTIVE"]
+        health_report["services"]["devops"] = {
+            "status": "HEALTHY",
+            "total_projects": len(devops_projects),
+            "active_projects": len(active_projects),
+        }
+    except Exception as e:
+        health_report["services"]["devops"] = {"status": "ERROR", "error": str(e)}
+
+    # Determine overall status
+    if any(s.get("status") == "ERROR" for s in health_report["services"].values()):
+        health_report["overall_status"] = "ERROR"
+    elif any(s.get("status") == "DEGRADED" for s in health_report["services"].values()):
+        health_report["overall_status"] = "DEGRADED"
+    elif any(s.get("status") == "WARNING" for s in health_report["services"].values()):
+        health_report["overall_status"] = "WARNING"
+
+    return health_report
 
 
 async def _get_oci_health_check(arguments: Dict[str, Any]) -> List[TextContent]:
@@ -2009,82 +2188,81 @@ async def _get_oci_health_check(arguments: Dict[str, Any]) -> List[TextContent]:
             )
         ]
 
-    health_report = {
-        "project": project,
-        "stage": stage,
-        "region": region,
-        "compartment_id": compartment_id,
-        "services": {},
-        "issues": [],
-        "overall_status": "HEALTHY",
-    }
-
     try:
-        # Check OKE clusters
-        try:
-            clusters = client.list_oke_clusters(compartment_id)
-            unhealthy_clusters = [c for c in clusters if c.lifecycle_state != "ACTIVE"]
-            health_report["services"]["oke"] = {
-                "status": "HEALTHY" if not unhealthy_clusters else "DEGRADED",
-                "total_clusters": len(clusters),
-                "active_clusters": len(clusters) - len(unhealthy_clusters),
-                "unhealthy_clusters": [
-                    {"name": c.name, "state": c.lifecycle_state} for c in unhealthy_clusters
-                ],
-            }
-            if unhealthy_clusters:
-                health_report["issues"].append(
-                    f"OKE: {len(unhealthy_clusters)} cluster(s) not in ACTIVE state"
-                )
-                health_report["overall_status"] = "DEGRADED"
-        except Exception as e:
-            health_report["services"]["oke"] = {"status": "ERROR", "error": str(e)}
-            health_report["issues"].append(f"OKE: Failed to check - {str(e)}")
-
-        # Check Compute instances
-        try:
-            instances = client.list_instances(compartment_id)
-            running = [i for i in instances if i.lifecycle_state == "RUNNING"]
-            stopped = [i for i in instances if i.lifecycle_state == "STOPPED"]
-            other = [i for i in instances if i.lifecycle_state not in ["RUNNING", "STOPPED", "TERMINATED"]]
-            health_report["services"]["compute"] = {
-                "status": "HEALTHY" if not other else "WARNING",
-                "total_instances": len(instances),
-                "running": len(running),
-                "stopped": len(stopped),
-                "other_states": len(other),
-            }
-            if other:
-                health_report["issues"].append(
-                    f"Compute: {len(other)} instance(s) in transitional states"
-                )
-        except Exception as e:
-            health_report["services"]["compute"] = {"status": "ERROR", "error": str(e)}
-
-        # Check DevOps projects
-        try:
-            devops_projects = client.list_devops_projects(compartment_id)
-            active_projects = [p for p in devops_projects if p.lifecycle_state == "ACTIVE"]
-            health_report["services"]["devops"] = {
-                "status": "HEALTHY",
-                "total_projects": len(devops_projects),
-                "active_projects": len(active_projects),
-            }
-        except Exception as e:
-            health_report["services"]["devops"] = {"status": "ERROR", "error": str(e)}
-
-        # Determine overall status
-        if any(s.get("status") == "ERROR" for s in health_report["services"].values()):
-            health_report["overall_status"] = "ERROR"
-        elif any(s.get("status") == "DEGRADED" for s in health_report["services"].values()):
-            health_report["overall_status"] = "DEGRADED"
-        elif any(s.get("status") == "WARNING" for s in health_report["services"].values()):
-            health_report["overall_status"] = "WARNING"
-
+        # Run blocking OCI calls in a thread pool to avoid blocking the event loop
+        health_report = await asyncio.to_thread(
+            _get_oci_health_check_sync, client, compartment_id, project, stage, region
+        )
         return [TextContent(type="text", text=json.dumps(health_report, indent=2))]
 
     except Exception as e:
         return [TextContent(type="text", text=f"Error performing health check: {str(e)}")]
+
+
+def _list_compartment_resources_sync(
+    client: OCIClient, compartment_id: str, project: str, stage: str, region: str
+) -> Dict[str, Any]:
+    """Synchronous helper for listing compartment resources - runs blocking API calls."""
+    resources: Dict[str, Any] = {
+        "project": project,
+        "stage": stage,
+        "region": region,
+        "compartment_id": compartment_id,
+        "resource_counts": {},
+        "resources": {},
+    }
+
+    # List OKE clusters
+    try:
+        clusters = client.list_oke_clusters(compartment_id)
+        resources["resource_counts"]["oke_clusters"] = len(clusters)
+        resources["resources"]["oke_clusters"] = [
+            {
+                "name": c.name,
+                "id": c.cluster_id,
+                "kubernetes_version": c.kubernetes_version,
+                "state": c.lifecycle_state,
+            }
+            for c in clusters
+        ]
+    except Exception as e:
+        resources["resources"]["oke_clusters_error"] = str(e)
+
+    # List Compute instances
+    try:
+        instances = client.list_instances(compartment_id)
+        resources["resource_counts"]["compute_instances"] = len(instances)
+        resources["resources"]["compute_instances"] = [
+            {
+                "name": i.display_name,
+                "id": i.instance_id,
+                "shape": i.shape,
+                "state": i.lifecycle_state,
+                "private_ip": i.private_ip,
+            }
+            for i in instances
+        ]
+    except Exception as e:
+        resources["resources"]["compute_instances_error"] = str(e)
+
+    # List DevOps projects
+    try:
+        devops = client.list_devops_projects(compartment_id)
+        resources["resource_counts"]["devops_projects"] = len(devops)
+        resources["resources"]["devops_projects"] = [
+            {
+                "name": p.name,
+                "id": p.project_id,
+                "state": p.lifecycle_state,
+            }
+            for p in devops
+        ]
+    except Exception as e:
+        resources["resources"]["devops_projects_error"] = str(e)
+
+    # Summary
+    resources["total_resources"] = sum(resources["resource_counts"].values())
+    return resources
 
 
 async def _list_compartment_resources(arguments: Dict[str, Any]) -> List[TextContent]:
@@ -2107,71 +2285,66 @@ async def _list_compartment_resources(arguments: Dict[str, Any]) -> List[TextCon
             )
         ]
 
-    resources = {
-        "project": project,
-        "stage": stage,
-        "region": region,
-        "compartment_id": compartment_id,
-        "resource_counts": {},
-        "resources": {},
-    }
-
     try:
-        # List OKE clusters
-        try:
-            clusters = client.list_oke_clusters(compartment_id)
-            resources["resource_counts"]["oke_clusters"] = len(clusters)
-            resources["resources"]["oke_clusters"] = [
-                {
-                    "name": c.name,
-                    "id": c.cluster_id,
-                    "kubernetes_version": c.kubernetes_version,
-                    "state": c.lifecycle_state,
-                }
-                for c in clusters
-            ]
-        except Exception as e:
-            resources["resources"]["oke_clusters_error"] = str(e)
-
-        # List Compute instances
-        try:
-            instances = client.list_instances(compartment_id)
-            resources["resource_counts"]["compute_instances"] = len(instances)
-            resources["resources"]["compute_instances"] = [
-                {
-                    "name": i.display_name,
-                    "id": i.instance_id,
-                    "shape": i.shape,
-                    "state": i.lifecycle_state,
-                    "private_ip": i.private_ip,
-                }
-                for i in instances
-            ]
-        except Exception as e:
-            resources["resources"]["compute_instances_error"] = str(e)
-
-        # List DevOps projects
-        try:
-            devops = client.list_devops_projects(compartment_id)
-            resources["resource_counts"]["devops_projects"] = len(devops)
-            resources["resources"]["devops_projects"] = [
-                {
-                    "name": p.name,
-                    "id": p.project_id,
-                    "state": p.lifecycle_state,
-                }
-                for p in devops
-            ]
-        except Exception as e:
-            resources["resources"]["devops_projects_error"] = str(e)
-
-        # Summary
-        resources["total_resources"] = sum(resources["resource_counts"].values())
-
+        # Run blocking OCI calls in a thread pool to avoid blocking the event loop
+        resources = await asyncio.to_thread(
+            _list_compartment_resources_sync, client, compartment_id, project, stage, region
+        )
         return [TextContent(type="text", text=json.dumps(resources, indent=2))]
 
     except Exception as e:
         return [TextContent(type="text", text=f"Error listing compartment resources: {str(e)}")]
+
+
+def _get_compute_instances_sync(
+    client: OCIClient,
+    compartment_id: str,
+    project: str,
+    stage: str,
+    region: str,
+    lifecycle_state: Optional[str],
+) -> Dict[str, Any]:
+    """Synchronous helper for listing compute instances - runs blocking API calls."""
+    from oci_client.client import LifecycleState
+
+    filter_state = None
+    if lifecycle_state:
+        try:
+            filter_state = LifecycleState(lifecycle_state)
+        except ValueError:
+            return {"error": f"Invalid lifecycle_state '{lifecycle_state}'. Valid values: RUNNING, STOPPED, TERMINATED, etc."}
+
+    instances = client.list_instances(compartment_id, lifecycle_state=filter_state)
+
+    # Group by state
+    by_state: Dict[str, List[Dict[str, Any]]] = {}
+    for instance in instances:
+        state = instance.lifecycle_state or "UNKNOWN"
+        if state not in by_state:
+            by_state[state] = []
+        by_state[state].append(
+            {
+                "name": instance.display_name,
+                "instance_id": instance.instance_id,
+                "shape": instance.shape,
+                "private_ip": instance.private_ip,
+                "availability_domain": instance.availability_domain,
+                "is_oke_node": "oke-" in (instance.display_name or "").lower(),
+            }
+        )
+
+    return {
+        "project": project,
+        "stage": stage,
+        "region": region,
+        "compartment_id": compartment_id,
+        "filter": {"lifecycle_state": lifecycle_state} if lifecycle_state else None,
+        "summary": {
+            "total_instances": len(instances),
+            "by_state": {state: len(insts) for state, insts in by_state.items()},
+        },
+        "instances_by_state": by_state,
+    }
 
 
 async def _get_compute_instances(arguments: Dict[str, Any]) -> List[TextContent]:
@@ -2196,52 +2369,15 @@ async def _get_compute_instances(arguments: Dict[str, Any]) -> List[TextContent]
         ]
 
     try:
-        # Import LifecycleState if filtering
-        from oci_client.client import LifecycleState
+        # Run blocking OCI calls in a thread pool to avoid blocking the event loop
+        result = await asyncio.to_thread(
+            _get_compute_instances_sync, client, compartment_id, project, stage, region, lifecycle_state
+        )
 
-        filter_state = None
-        if lifecycle_state:
-            try:
-                filter_state = LifecycleState(lifecycle_state)
-            except ValueError:
-                return [
-                    TextContent(
-                        type="text",
-                        text=f"Error: Invalid lifecycle_state '{lifecycle_state}'. Valid values: RUNNING, STOPPED, TERMINATED, etc.",
-                    )
-                ]
+        # Check if there was an error in the sync function
+        if "error" in result:
+            return [TextContent(type="text", text=f"Error: {result['error']}")]
 
-        instances = client.list_instances(compartment_id, lifecycle_state=filter_state)
-
-        # Group by state
-        by_state: Dict[str, List[Dict[str, Any]]] = {}
-        for instance in instances:
-            state = instance.lifecycle_state or "UNKNOWN"
-            if state not in by_state:
-                by_state[state] = []
-            by_state[state].append(
-                {
-                    "name": instance.display_name,
-                    "instance_id": instance.instance_id,
-                    "shape": instance.shape,
-                    "private_ip": instance.private_ip,
-                    "availability_domain": instance.availability_domain,
-                    "is_oke_node": "oke-" in (instance.display_name or "").lower(),
-                }
-            )
-
-        result = {
-            "project": project,
-            "stage": stage,
-            "region": region,
-            "compartment_id": compartment_id,
-            "filter": {"lifecycle_state": lifecycle_state} if lifecycle_state else None,
-            "summary": {
-                "total_instances": len(instances),
-                "by_state": {state: len(insts) for state, insts in by_state.items()},
-            },
-            "instances_by_state": by_state,
-        }
         return [TextContent(type="text", text=json.dumps(result, indent=2))]
 
     except Exception as e:
